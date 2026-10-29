@@ -1,0 +1,516 @@
+{
+  "source": {
+    "midi": "synthetic-score.mid",
+    "sha256": "e842e9d487170e7526bb5acee9a1c15bb954f5a5d23f33be690c329be764bbac",
+    "bytes": 105,
+    "ppqn": 480,
+    "trackCount": 1,
+    "trackNotes": [
+      {
+        "name": "",
+        "notes": 6
+      }
+    ],
+    "endQuarter": 64,
+    "duration": 38.0625,
+    "openingBPM": 120,
+    "measures": 16,
+    "tempoSegments": [
+      {
+        "quarter": 0,
+        "seconds": 0,
+        "secondsPerQuarter": 0.5
+      },
+      {
+        "quarter": 1.5,
+        "seconds": 0.75,
+        "secondsPerQuarter": 0.375
+      },
+      {
+        "quarter": 8.5,
+        "seconds": 3.375,
+        "secondsPerQuarter": 0.625
+      }
+    ]
+  },
+  "preparation": {
+    "0": {
+      "prepBeats": 0,
+      "leadSeconds": 0.5,
+      "prepSeconds": 0.5,
+      "musicalEnd": 38.5625,
+      "totalBeats": 64,
+      "samples": [
+        {
+          "time": 0,
+          "position": {
+            "beat": 3,
+            "f": 0,
+            "measure": null,
+            "preparing": true,
+            "leadIn": true,
+            "ended": false,
+            "bpm": 120
+          }
+        },
+        {
+          "time": 0.5,
+          "position": {
+            "beat": 0,
+            "f": 0,
+            "measure": 1,
+            "preparing": false,
+            "ended": false,
+            "bpm": 120
+          }
+        },
+        {
+          "time": 0.5,
+          "position": {
+            "beat": 0,
+            "f": 0,
+            "measure": 1,
+            "preparing": false,
+            "ended": false,
+            "bpm": 120
+          }
+        },
+        {
+          "time": 0.5,
+          "position": {
+            "beat": 0,
+            "f": 0,
+            "measure": 1,
+            "preparing": false,
+            "ended": false,
+            "bpm": 120
+          }
+        },
+        {
+          "time": 1,
+          "position": {
+            "beat": 1,
+            "f": 0,
+            "measure": 1,
+            "preparing": false,
+            "ended": false,
+            "bpm": 120
+          }
+        },
+        {
+          "time": 2.1875,
+          "position": {
+            "beat": 0,
+            "f": 0,
+            "measure": 2,
+            "preparing": false,
+            "ended": false,
+            "bpm": 160
+          }
+        },
+        {
+          "time": 38.5625,
+          "position": {
+            "beat": 3,
+            "f": 0.9999999899999992,
+            "measure": 16,
+            "preparing": false,
+            "ended": true,
+            "bpm": 96
+          }
+        }
+      ]
+    },
+    "2": {
+      "prepBeats": 8,
+      "leadSeconds": 0.5,
+      "prepSeconds": 4.5,
+      "musicalEnd": 42.5625,
+      "totalBeats": 72,
+      "samples": [
+        {
+          "time": 0,
+          "position": {
+            "beat": 3,
+            "f": 0,
+            "measure": null,
+            "preparing": true,
+            "leadIn": true,
+            "ended": false,
+            "bpm": 120
+          }
+        },
+        {
+          "time": 0.5,
+          "position": {
+            "beat": 0,
+            "f": 0,
+            "measure": -2,
+            "preparing": true,
+            "ended": false,
+            "bpm": 120
+          }
+        },
+        {
+          "time": 4.5,
+          "position": {
+            "beat": 0,
+            "f": 0,
+            "measure": 1,
+            "preparing": false,
+            "ended": false,
+            "bpm": 120
+          }
+        },
+        {
+          "time": 4.5,
+          "position": {
+            "beat": 0,
+            "f": 0,
+            "measure": 1,
+            "preparing": false,
+            "ended": false,
+            "bpm": 120
+          }
+        },
+        {
+          "time": 5,
+          "position": {
+            "beat": 1,
+            "f": 0,
+            "measure": 1,
+            "preparing": false,
+            "ended": false,
+            "bpm": 120
+          }
+        },
+        {
+          "time": 6.1875,
+          "position": {
+            "beat": 0,
+            "f": 0,
+            "measure": 2,
+            "preparing": false,
+            "ended": false,
+            "bpm": 160
+          }
+        },
+        {
+          "time": 42.5625,
+          "position": {
+            "beat": 3,
+            "f": 0.9999999899999992,
+            "measure": 16,
+            "preparing": false,
+            "ended": true,
+            "bpm": 96
+          }
+        }
+      ]
+    }
+  },
+  "cadenza": {
+    "input": [
+      {
+        "startMeasure": 1,
+        "startBeat": 2,
+        "returnMeasure": 11,
+        "returnBeat": 3
+      },
+      {
+        "startMeasure": 12,
+        "startBeat": 2,
+        "returnMeasure": 14,
+        "returnBeat": 1
+      }
+    ],
+    "settings": [
+      {
+        "startMeasure": 1,
+        "startBeat": 2,
+        "returnMeasure": 11,
+        "returnBeat": 3
+      },
+      {
+        "startMeasure": 12,
+        "startBeat": 2,
+        "returnMeasure": 14,
+        "returnBeat": 1
+      }
+    ],
+    "compiled": [
+      {
+        "startMeasure": 1,
+        "startBeat": 2,
+        "returnMeasure": 11,
+        "returnBeat": 3,
+        "startQuarter": 1,
+        "returnQuarter": 42,
+        "startSeconds": 0.5,
+        "returnSeconds": 24.3125
+      },
+      {
+        "startMeasure": 12,
+        "startBeat": 2,
+        "returnMeasure": 14,
+        "returnBeat": 1,
+        "startQuarter": 45,
+        "returnQuarter": 52,
+        "startSeconds": 26.1875,
+        "returnSeconds": 30.5625
+      }
+    ]
+  },
+  "geometry": {
+    "landings": [
+      [
+        0,
+        0.6
+      ],
+      [
+        0.66,
+        0.58
+      ],
+      [
+        -0.66,
+        0.58
+      ],
+      [
+        -0.06,
+        0.56
+      ]
+    ],
+    "controls": [
+      [
+        [
+          0.08,
+          0.43
+        ],
+        [
+          0.66,
+          0.43
+        ]
+      ],
+      [
+        [
+          0.43,
+          0.34
+        ],
+        [
+          -0.43,
+          0.34
+        ]
+      ],
+      [
+        [
+          -0.66,
+          0.35
+        ],
+        [
+          -0.1,
+          0.39
+        ]
+      ],
+      [
+        [
+          0.18,
+          -0.2733333333
+        ],
+        [
+          0,
+          -0.2733333333
+        ]
+      ]
+    ],
+    "samples": [
+      [
+        {
+          "beat": 0,
+          "f": 0,
+          "point": [
+            0,
+            0.6
+          ]
+        },
+        {
+          "beat": 0,
+          "f": 0.25,
+          "point": [
+            0.13687500000000002,
+            0.5040625
+          ]
+        },
+        {
+          "beat": 0,
+          "f": 0.5,
+          "point": [
+            0.36,
+            0.47000000000000003
+          ]
+        },
+        {
+          "beat": 0,
+          "f": 0.75,
+          "point": [
+            0.568125,
+            0.4959374999999999
+          ]
+        },
+        {
+          "beat": 0,
+          "f": 1,
+          "point": [
+            0.66,
+            0.58
+          ]
+        }
+      ],
+      [
+        {
+          "beat": 1,
+          "f": 0,
+          "point": [
+            0.66,
+            0.58
+          ]
+        },
+        {
+          "beat": 1,
+          "f": 0.25,
+          "point": [
+            0.3890625,
+            0.44499999999999995
+          ]
+        },
+        {
+          "beat": 1,
+          "f": 0.5,
+          "point": [
+            1.3877787807814457e-17,
+            0.4
+          ]
+        },
+        {
+          "beat": 1,
+          "f": 0.75,
+          "point": [
+            -0.3890625,
+            0.445
+          ]
+        },
+        {
+          "beat": 1,
+          "f": 1,
+          "point": [
+            -0.66,
+            0.58
+          ]
+        }
+      ],
+      [
+        {
+          "beat": 2,
+          "f": 0,
+          "point": [
+            -0.66,
+            0.58
+          ]
+        },
+        {
+          "beat": 2,
+          "f": 0.25,
+          "point": [
+            -0.571875,
+            0.4559375
+          ]
+        },
+        {
+          "beat": 2,
+          "f": 0.5,
+          "point": [
+            -0.37500000000000006,
+            0.42
+          ]
+        },
+        {
+          "beat": 2,
+          "f": 0.75,
+          "point": [
+            -0.170625,
+            0.45906250000000004
+          ]
+        },
+        {
+          "beat": 2,
+          "f": 1,
+          "point": [
+            -0.06,
+            0.56
+          ]
+        }
+      ],
+      [
+        {
+          "beat": 3,
+          "f": 0,
+          "point": [
+            -0.06,
+            0.56
+          ]
+        },
+        {
+          "beat": 3,
+          "f": 0.25,
+          "point": [
+            0.05062499999999999,
+            0.09187500001875001
+          ]
+        },
+        {
+          "beat": 3,
+          "f": 0.5,
+          "point": [
+            0.060000000000000005,
+            -0.05999999997499998
+          ]
+        },
+        {
+          "beat": 3,
+          "f": 0.75,
+          "point": [
+            0.024374999999999997,
+            0.10812500001875
+          ]
+        },
+        {
+          "beat": 3,
+          "f": 1,
+          "point": [
+            0,
+            0.6
+          ]
+        }
+      ]
+    ]
+  },
+  "csv": {
+    "range": {
+      "startMeasure": 1,
+      "startBeat": 1,
+      "endMeasure": 2,
+      "endBeat": 1
+    },
+    "manualEndpointsSeconds": [
+      0.5,
+      2
+    ],
+    "text": "measure,beat,quarter_note_bpm,recording_seconds,action\r\n1,1,160.000,0.500,set\r\n2,1,160.000,2.000,restore_original_tempo",
+    "semantics": {
+      "header": "measure,beat,quarter_note_bpm,recording_seconds,action",
+      "lineEnding": "CRLF",
+      "tempoPrecision": 3,
+      "restoreOriginalTempo": true,
+      "restorationBoundary": "exclusive end beat"
+    }
+  }
+}

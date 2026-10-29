@@ -1,0 +1,41 @@
+{
+  "beats": [
+    {
+      "quarter": 0,
+      "time": 1.497
+    },
+    {
+      "quarter": 1,
+      "time": 2.117
+    },
+    {
+      "quarter": 2,
+      "time": 2.747
+    },
+    {
+      "quarter": 3,
+      "time": 3.397
+    },
+    {
+      "quarter": 4,
+      "time": 4.067
+    },
+    {
+      "quarter": 5,
+      "time": 4.767
+    },
+    {
+      "quarter": 6,
+      "time": 5.467
+    },
+    {
+      "quarter": 7,
+      "time": 6.22
+    },
+    {
+      "quarter": 8,
+      "time": 6.972
+    }
+  ],
+  "matched": 6
+}

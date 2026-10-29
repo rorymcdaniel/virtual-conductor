@@ -1,0 +1,52 @@
+# SwiftPM and local IDE state
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# Packaged builds and signing material
+*.app/
+*.dmg
+*.pkg
+*.zip
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
+
+# Local OS, agent, and environment state
+.DS_Store
+.codex/
+.scratch/
+.env
+.env.*
+!.env.example
+*.log
+
+# User recordings, score exports, and session data
+Recordings/
+Exports/
+LocalData/
+*.wav
+*.aif
+*.aiff
+*.mp3
+*.m4a
+*.flac
+*.mid
+*.midi
+*.mscz
+*.mscx
+*.musicxml
+*.mxl
+*.pdf
+# Only generated synthetic test MIDI belongs in version control.
+!Tests/ConductorCoreTests/Fixtures/fractional-tempo.mid
+!Tests/ConductorCoreTests/Fixtures/synthetic-score.mid
+*.pem
+*.key
+*.xcarchive/
+*.xcresult/
+.idea/
+node_modules/

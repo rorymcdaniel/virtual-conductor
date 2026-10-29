@@ -1,0 +1,72 @@
+{
+  "source": "fractional-tempo.mid",
+  "sha256": "ec64de12c8aecfa4c392d9d7749b580bb2cccea3a5a722a4f5daa8afa01a118f",
+  "bytes": 69,
+  "parsed": {
+    "ppqn": 480,
+    "endQuarter": 8,
+    "duration": 4.3125,
+    "openingBPM": 120,
+    "tempoSegments": [
+      {
+        "quarter": 0,
+        "seconds": 0,
+        "secondsPerQuarter": 0.5
+      },
+      {
+        "quarter": 1.5,
+        "seconds": 0.75,
+        "secondsPerQuarter": 0.375
+      },
+      {
+        "quarter": 3.5,
+        "seconds": 1.5,
+        "secondsPerQuarter": 0.625
+      }
+    ],
+    "probes": [
+      {
+        "quarter": 0,
+        "seconds": 0,
+        "roundTrip": 0,
+        "bpm": 120
+      },
+      {
+        "quarter": 1,
+        "seconds": 0.5,
+        "roundTrip": 1,
+        "bpm": 120
+      },
+      {
+        "quarter": 1.5,
+        "seconds": 0.75,
+        "roundTrip": 1.5,
+        "bpm": 160
+      },
+      {
+        "quarter": 2.75,
+        "seconds": 1.21875,
+        "roundTrip": 2.75,
+        "bpm": 160
+      },
+      {
+        "quarter": 3.5,
+        "seconds": 1.5,
+        "roundTrip": 3.5,
+        "bpm": 96
+      },
+      {
+        "quarter": 4,
+        "seconds": 1.8125,
+        "roundTrip": 4,
+        "bpm": 96
+      },
+      {
+        "quarter": 8,
+        "seconds": 4.3125,
+        "roundTrip": 8,
+        "bpm": 96
+      }
+    ]
+  }
+}
