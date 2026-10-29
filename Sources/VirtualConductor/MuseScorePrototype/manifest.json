@@ -1,0 +1,1 @@
+{"uri": "musescore://extensions/virtualconductor/tempo-proof", "type": "composite", "title": "PROTOTYPE tempo proof", "ui_context": "Any", "actions": [{"code": "processing", "type": "macros", "path": "processing.js"}]}
