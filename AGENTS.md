@@ -13,6 +13,20 @@ where appropriate.
 Use the Matt Pocock skill workflows to define the product clearly before
 implementation and maintain sound software engineering practices throughout.
 
+## Delivery philosophy
+
+This is a personal, noncritical tool used by its owner. Deliver integrated
+features ready for the owner to try. Use prototypes when they help engineering,
+but carry useful results into the app rather than stopping at a proof.
+Document untested behavior and known limitations; incomplete real-world
+validation alone is not a reason to withhold a usable feature. Run practical
+checks and preserve the owner's music and recordings.
+
+The product should let the owner spend time playing their instrument instead
+of operating the tool. Development should let the owner spend time using the
+tool instead of managing its construction. Own implementation and follow-through;
+ask about product decisions only when necessary.
+
 ## Git workflow
 
 The user owns product decisions; agents own engineering, including Git
