@@ -1,6 +1,6 @@
 # Resume MuseScore integration work
 
-Paused at the user's request on 2026-10-29. This is a handoff prompt for a fresh session, not an instruction to continue while the work is paused.
+Resumed at the user's request on 2026-10-29. The first native-tempo proof is complete; see the research report's “Installed-runtime proof” section and GitHub issue #1. Historical sections below describe the original pause; use the newer measured findings when they differ. Next work is persistent companion communication and the remaining proof gates.
 
 ## Prompt for the next session
 

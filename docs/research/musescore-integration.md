@@ -10,6 +10,20 @@ The parent agent also verified **Xcode 26.2 (17C52), macOS SDK 26.2** with `xcod
 
 Repository baseline: [README](../../README.md) describes matching MIDI/WAV exports, reviewed/approved interpretation CSV, session-scoped takes and MuseScore as editable master. It explicitly says users currently apply the tempo list and re-export themselves. There is no existing CONTEXT.md or ADR decision to supersede.
 
+## Installed-runtime proof — 2026-10-29
+
+Resumed after the OS upgrade. Local baseline: MuseScore 4.7.6, macOS 27.2, Xcode 27.1. [Evidence and next proof gate](https://github.com/rorymcdaniel/virtual-conductor/issues/1). The reproducible throwaway prototype is preserved on [prototype/musescore-tempo-proof](https://github.com/rorymcdaniel/virtual-conductor/tree/f703353/Sources/VirtualConductor/MuseScorePrototype), outside main.
+
+A generated three-bar score contains C4 whole note, whole-bar rest, and D4 whole note. Native tempo objects inserted at quarter beats 0, 1, 5, 8 persist through native save/reopen. Independently parsed MIDI export reports microseconds per quarter 500000, 1000000, 666667, 500000 at those exact positions (120, 60, approximately 90, 120 BPM). Notes and rests remain unchanged. This validates TimeTick anchors inside sustained notes/rests for this fixture.
+
+`endCmd(true)` rolls back all four markings. In the interactive application, all four markings are visible and grouped under “PROTOTYPE apply tempo”; one Undo removes them all and one Redo restores them all. CLI `cmd("undo")`/`cmd("redo")` did not change the exported score, so the automated rows are not evidence of interactive undo success. The GUI was checked separately with the same extension and synthetic score; the disposable GUI edits were discarded afterward.
+
+A separate export of the edited native score produced a nonzero, stereo 44.1 kHz float32 WAV of 11.5 seconds. The MIDI tempo map spans 8.5 musical seconds; the WAV duration alone does not prove onset alignment or explain the additional tail. Audio fidelity and timing still require measured comparison.
+
+**Runtime API mismatch:** `api.engraving.Element.TEMPO_TEXT` is a string in this installed macros runtime, while `newElement` expects a numeric ID. The prototype used enum ordering plus a returned-native-type guard to investigate feasibility. That is an experimental workaround, not a stable production contract. Resolve the mismatch before adopting a companion implementation. It initially returned a Tuplet under an incorrect offset, demonstrating why output inspection is essential.
+
+No user score was opened or modified. The temporary extension was removed after validation. No application integration, live bridge, or preview/keep workflow has been implemented. Next: prove persistent companion communication and lifecycle, then competing tempo effects, boundary restoration, manual edits, repeats, snapshot identity, export fidelity, and preview equivalence. Only then turn the supported design into implementation tickets.
+
 ## Recommendation
 
 Build a small MuseScore companion plugin/extension and a corresponding integration module in Virtual Conductor. The companion changes the **open native score through MuseScore's own editing API**, so layout/instruments/notation remain in MuseScore and the whole application of an interpretation is one undoable operation. Virtual Conductor owns recording, review, approval, score-version matching and automatic export refresh.
