@@ -13,7 +13,9 @@ Scripts/build-virtual-conductor.sh
 open '.build/virtual-conductor/Virtual Conductor.app'
 ```
 
-Use **Load new exports…** to select a matching MIDI/WAV pair. Re-export in MuseScore and use **Reread exports** after changes. Files and takes remain session-scoped. The application never alters the source score or accompaniment.
+For the integrated **play → listen → keep** workflow, choose **MuseScore rehearsal…**. See [MuseScore setup and testing status](docs/musescore-rehearsal.md). The first version automates preparation, renders your timing for listening, and applies kept timing to the open MuseScore score with Undo.
+
+Use **Load new exports…** to select a matching MIDI/WAV pair. Re-export in MuseScore and use **Reread exports** after changes. Files and takes remain session-scoped. Manual export loading never alters those files. The MuseScore companion changes the open score only when you choose **Keep it**.
 
 Space plays/pauses, H shows/hides controls, and Right Arrow resumes from a configured cadenza wait. Text entry and modal utilities block performance shortcuts. Output selection is app-local. Recording uses a separate input engine without monitoring; microphone permission is requested when enabling input.
 
@@ -21,7 +23,7 @@ Cadenza settings are stored in `~/Library/Application Support/VirtualConductor/c
 
 ## Interpretation review
 
-Choose a passage of up to 128 quarter beats, enable input and record up to 120 seconds. Analyze a monophonic solo part or set manual timing endpoints, review/edit each beat, and approve before exporting CSV. Edits revoke approval. Repeated pitches, sustained notes and rests can make alignment ambiguous. MuseScore remains the editable master; apply the reviewed tempo list and re-export matching MIDI/WAV yourself.
+Choose a passage of up to 128 quarter beats, enable input and record up to 120 seconds. Analyze a monophonic solo part or set manual timing endpoints, review/edit each beat, and approve before exporting CSV. Edits revoke approval. Repeated pitches, sustained notes and rests can make alignment ambiguous. MuseScore remains the editable master. Connected rehearsals can preview and keep timing directly; the CSV workflow remains available for manually loaded exports.
 
 ## Checks
 

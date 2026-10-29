@@ -2,6 +2,10 @@
 
 Researched 2026-10-28. Scope: remove manual entry of approved recorded tempo changes first; automate matching MIDI/WAV preparation second. This is a feasibility report and proposed workflow, not a claim that integration has been implemented.
 
+## Current implementation
+
+An initial connected rehearsal feature is now in the app. See [setup, supported scope, and unconfirmed behavior](../musescore-rehearsal.md). Historical recommendations and proof gates below are research context, not a requirement to withhold useful features. The live companion uses local request/response files; separate MuseScore processes render previews. Keep applies the same tempo payload to the open score in one undo transaction.
+
 ## Baseline and evidence
 
 The installed application is `/Applications/MuseScore 4.app`, version **4.7.6** (read from its `Contents/Info.plist`). `sw_vers` reports **macOS 15.6, build 24G84**. Target these installed versions and newer; no legacy compatibility layer is needed. The exact upstream tag is [v4.7.6](https://github.com/musescore/MuseScore/releases/tag/v4.7.6). Sources below are pinned to that tag wherever possible. The general command-line handbook explicitly warns that it was copied from MuseScore 3, so it is not sufficient evidence for current behavior. [Official CLI handbook](https://musescore.org/en/print/book/export/html/329750).

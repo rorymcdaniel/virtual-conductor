@@ -19,6 +19,9 @@ BIN="$(swift build -c release --show-bin-path)"
 APP="$PWD/.build/virtual-conductor/Virtual Conductor.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/VirtualConductor" "$APP/Contents/MacOS/VirtualConductor"
+for bundle in "$BIN"/*.bundle; do
+    if [ -d "$bundle" ]; then cp -R "$bundle" "$APP/Contents/Resources/"; fi
+done
 cp AppResources/VirtualConductor/Info.plist "$APP/Contents/Info.plist"
 codesign --force --sign - "$APP"
 printf '%s\n' "$APP"

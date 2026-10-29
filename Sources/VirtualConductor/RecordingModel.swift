@@ -24,11 +24,16 @@ struct RecordedTake {
     @Published var endBeat = 1
     @Published var trackIndex = -1
     @Published var tracks: [MIDITrack] = []
-    @Published var beats: [BeatTime] = []
+    @Published var beats: [BeatTime] = [] { didSet { museScore?.invalidatePreview(); heardPreview = false } }
     @Published var approved = false
     @Published var manualStart = 0.0
     @Published var manualEnd = 0.0
     @Published var playbackTime = 0.0
+    var museScore: MuseScoreLink?
+    var onKeep: ((RehearsalFiles) -> Void)?
+    @Published var heardPreview = false
+    @Published var accompanimentPlaying = false
+    private var playbackDuration = 0.0
     private let capture = InputCapture()
     private let audio: PerformanceAudio
     private let permission: () async -> Bool
@@ -54,6 +59,7 @@ struct RecordedTake {
         guard fingerprint != self.fingerprint else { return }
         close(); takeGeneration &+= 1; finalizing = false; busy = false
         self.fingerprint = fingerprint; midi = score; tracks = score.tracks; take = nil; beats = []; approved = false
+        startMeasure = 1; startBeat = 1; endMeasure = min(5, score.measures + 1); endBeat = 1
         let horns = tracks.indices.filter { tracks[$0].name.range(of:"horn|валторн",options:[.regularExpression,.caseInsensitive]) != nil && tracks[$0].notes > 3 && tracks[$0].noteEvents.first?.startQuarter == 0 }
         trackIndex = horns.count == 1 ? horns[0] : -1
     }
@@ -110,11 +116,11 @@ struct RecordedTake {
         level = capture.storage?.peak.load(ordering:.relaxed) ?? 0
         if recording, let storage = capture.storage, storage.count.load(ordering:.acquiring) >= storage.capacity { stop() }
         if playing, let take {
-            playbackTime = max(0,PerformanceAudio.hostSeconds-audio.auxiliaryOrigin)
-            if !audio.ready || playbackTime >= take.duration { stopPlayback() }
+            playbackTime = max(0,PerformanceAudio.hostSeconds-(accompanimentPlaying ? previewOrigin : audio.auxiliaryOrigin))
+            if !audio.ready || playbackTime >= (accompanimentPlaying ? playbackDuration : take.duration) { stopPlayback() }
         }
     }
-    func stopPlayback() { if playing { audio.stop() }; playing = false }
+    func stopPlayback() { if playing { audio.stop() }; playing = false; accompanimentPlaying = false }
     func play() {
         if playing { stopPlayback(); return }
         guard !recording,!busy,let take else { return }
@@ -137,10 +143,46 @@ struct RecordedTake {
     }
     func manual() { guard let take else { return }; proposal { try Interpretation.manual(range:take.range,start:manualStart,end:manualEnd,duration:take.duration) } }
     func simplify() { guard let take else { return }; proposal { try Interpretation.simplify(beats,duration:take.duration) } }
-    private func proposal(_ work: () throws -> [BeatTime]) { stopPlayback(); approved = false; do { beats = try work(); message = "Draft — review every beat before approving." } catch { message = error.localizedDescription } }
+    private func proposal(_ work: () throws -> [BeatTime]) { stopPlayback(); approved = false; do { beats = try work(); message = "Draft ready. Hear the accompaniment, or adjust timing if needed." } catch { message = error.localizedDescription } }
     func editBeat(index: Int, time: Double) { guard beats.indices.contains(index) else { return }; stopPlayback(); approved = false; beats[index].time = time }
     func changeTrack() { generation &+= 1; analysis?.cancel(); beats = []; approved = false; busy = false }
     func approve() { guard let take else { return }; do { try Interpretation.validate(beats,duration:take.duration); approved = true; message = "Approved for CSV export. Score and performance are unchanged." } catch { approved = false; message = error.localizedDescription } }
+    func refreshLinkedScore(_ score: MIDIFile, fingerprint: String) {
+        midi = score; self.fingerprint = fingerprint; tracks = score.tracks
+    }
+    func hearAccompaniment() {
+        guard !busy, !recording, let take, let midi, let link = museScore else { return }
+        stopPlayback(); busy = true; message = "Rendering accompaniment with your timing…"; generation &+= 1; let token = generation
+        Task {
+            do {
+                let files = try await link.makePreview(beats: beats, take: take, midi: midi)
+                guard token == generation else { busy = false; return }
+                let previewMIDI = try MIDIFile(data: Data(contentsOf: files.midi))
+                let source = try PreparedPerformance.load(files.wav)
+                let timing = try PerformanceTiming(midi: previewMIDI, preparatoryMeasures: 0)
+                let start = previewMIDI.seconds(atQuarter: take.range.start)
+                let end = min(Double(source.frameLength)/source.format.sampleRate, previewMIDI.seconds(atQuarter: take.range.end))
+                let segment = try PreparedPerformance.makeSegment(source: source, timing: timing, position: start, end: end)
+                try audio.play(segment, immediate: true)
+                // Timer uses the same host clock as normal playback, offset to this passage.
+                playbackDuration = end-start; playbackTime = 0
+                previewOrigin = audio.audibleOrigin + start
+                accompanimentPlaying = true; playing = true; heardPreview = true; busy = false
+                message = "Listen to the accompaniment. Keep it if it follows your playing."
+            } catch { busy = false; message = error.localizedDescription }
+        }
+    }
+    private var previewOrigin = 0.0
+    func keepInterpretation() {
+        guard heardPreview, !busy, let link = museScore else { return }
+        stopPlayback(); busy = true
+        Task {
+            do {
+                let files = try await link.keep(); busy = false; heardPreview = false
+                message = link.message; onKeep?(files)
+            } catch { busy = false; message = error.localizedDescription }
+        }
+    }
     func exportCSV() {
         guard approved, let take, let midi else { return }
         do { let text = try Interpretation.csv(beats:beats,range:take.range,midi:midi,duration:take.duration); try save(Data(text.utf8),name:"virtual-conductor-tempo-map.csv") } catch { message = error.localizedDescription }

@@ -1,4 +1,6 @@
-# Resume MuseScore integration work
+Current status: the integration has moved into the app. Follow [setup and testing status](../musescore-rehearsal.md). The owner prefers integrated features ready to try, with unconfirmed behavior documented. The historical proof-gate sequence below is no longer a release prerequisite.
+
+# MuseScore integration: historical handoff
 
 Resumed at the user's request on 2026-10-29. The first native-tempo proof is complete; see the research report's “Installed-runtime proof” section and GitHub issue #1. Historical sections below describe the original pause; use the newer measured findings when they differ. Next work is persistent companion communication and the remaining proof gates.
 

@@ -18,11 +18,11 @@ struct RecordingView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Record an interpretation").font(.title2.weight(.semibold))
-                    Text("Play your solo freely, then review a draft of its beat timing.")
+                    Text("Play freely, hear the accompaniment follow you, then keep it.")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Close", action: onClose).keyboardShortcut(.cancelAction)
+                Button("Close", action: onClose).keyboardShortcut(.cancelAction).disabled(locked)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -31,7 +31,16 @@ struct RecordingView: View {
                     if let take = model.take {
                         takeSection(take)
                         draftSection
-                        if !model.beats.isEmpty { reviewSection }
+                        if !model.beats.isEmpty {
+                            if let link = model.museScore, link.connected {
+                                HStack {
+                                    Button("Hear accompaniment", action: model.hearAccompaniment).disabled(locked || !validBeatMap)
+                                    Button("Keep it", action: model.keepInterpretation).buttonStyle(.borderedProminent)
+                                        .disabled(locked || !model.heardPreview)
+                                }
+                            }
+                            DisclosureGroup("Adjust beat timing (optional)") { reviewSection }
+                        }
                     }
                 }.padding(.trailing, 8)
             }
@@ -43,6 +52,7 @@ struct RecordingView: View {
                 Spacer(minLength: 0)
             }.frame(minHeight: 32, alignment: .topLeading)
         }
+        .interactiveDismissDisabled(locked)
         .padding(24)
         .frame(minWidth: 820, idealWidth: 880, minHeight: 690, idealHeight: 780)
     }
@@ -193,7 +203,7 @@ struct RecordingView: View {
                             .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity)
                 }
-                Text(model.approved ? "Approved for export. Your score and performance audio have not been changed." : "Draft — listen and correct every beat before approving. Changes revoke approval.")
+                Text(model.approved ? "Approved for export. Your score and performance audio have not been changed." : "Draft — listen first. Adjust beats here only if the timing needs correction.")
                     .font(.callout).foregroundStyle(model.approved ? Color.green : Color.secondary)
                 HStack(spacing: 12) {
                     Button("Simplify within measures", action: model.simplify).disabled(!validBeatMap)

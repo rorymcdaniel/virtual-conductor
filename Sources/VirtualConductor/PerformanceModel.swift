@@ -32,7 +32,13 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
     @Published var fingerprint = ""
     @Published var prepared: PreparedPerformance?
     let audio = PerformanceAudio()
-    lazy var recording = RecordingModel(audio: audio)
+    let museScore = MuseScoreLink()
+    lazy var recording: RecordingModel = {
+        let model = RecordingModel(audio: audio)
+        model.museScore = museScore
+        model.onKeep = { [weak self] files in self?.load(midi: files.midi, wav: files.wav, preservingTake: true) }
+        return model
+    }()
     private var run: UInt64 = 0
     private var position = 0.0
     private var segmentStart = 0.0
@@ -85,7 +91,8 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         } catch { outputMissing = true; message = error.localizedDescription }
     }
     func testOutput() { guard !locked else { return }; do { if !audio.ready { chooseOutput() }; try audio.testTone() } catch { message = error.localizedDescription } }
-    func load(midi: URL, wav: URL) {
+    func load(midi: URL, wav: URL, preservingTake: Bool = false, linked: Bool = false) {
+        if !preservingTake && !linked { museScore.disconnect() }
         run &+= 1; let token = run
         audio.stop(); recording.close(); state = .loading; message = "Reading exports and preparing audio…"
         Task {
@@ -96,13 +103,14 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
                 }.value
                 guard token == run else { return }
                 var saved: [CadenzaPassage] = []; var warning = ""
-                do { saved = try settings.load(fingerprint: result.2); _ = try compileCadenzas(saved,midi:result.0,audioDuration:Double(result.1.frameLength)/result.1.format.sampleRate) }
+                do { saved = preservingTake ? passages : try settings.load(fingerprint: result.2); _ = try compileCadenzas(saved,midi:result.0,audioDuration:Double(result.1.frameLength)/result.1.format.sampleRate) }
                 catch { warning = " Saved settings could not load: \(error.localizedDescription)"; saved = [] }
                 let prep = preparation, values = saved
                 let new = try await Task.detached { try PreparedPerformance(midi:result.0,source:result.1,preparation:prep,passages:values) }.value
                 guard token == run else { return }
                 prepared = new; fingerprint = result.2; passages = saved; midiURL = midi; wavURL = wav
-                recording.setScore(result.0, fingerprint:result.2)
+                if preservingTake { recording.refreshLinkedScore(result.0, fingerprint: result.2); if utilityOpen { recording.open() } }
+                else { recording.setScore(result.0, fingerprint:result.2) }
                 position = 0; segmentStart = 0; passageIndex = 0; state = .ready
                 if !outputMissing { chooseOutput() }
                 message = "\(result.0.measures) measures · opening ♩ = \(String(format:"%.1f",result.0.openingBPM)). Ready.\(warning)"

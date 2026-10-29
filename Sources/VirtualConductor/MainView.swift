@@ -6,6 +6,7 @@ import ConductorCore
 @MainActor
 struct MainView: View {
     @ObservedObject var model: PerformanceModel
+    @State private var museScoreOpen = false
     private let accent = Color(red: 0.63, green: 0.90, blue: 0.83)
     private var editable: Bool { model.prepared != nil && [.ready, .paused, .waiting, .finished, .interrupted].contains(model.state) }
     private var outputs: [AudioDevice] { model.devices.filter(\.output) }
@@ -55,6 +56,12 @@ struct MainView: View {
         .preferredColorScheme(.dark)
         .tint(accent)
         .frame(minWidth: 980, minHeight: 640)
+        .onChange(of: museScoreOpen) { _, open in model.filePanelOpen = open }
+        .sheet(isPresented: $museScoreOpen) {
+            MuseScoreSetupView(link: model.museScore) { files in
+                museScoreOpen = false; model.load(midi: files.midi, wav: files.wav, linked: true)
+            }
+        }
         .sheet(isPresented: $model.importOpen) { ImportExportsView(model: model) }
         .sheet(isPresented: $model.editorOpen) { CadenzaEditorView(model: model) }
         .sheet(isPresented: $model.utilityOpen, onDismiss: model.closeRecording) {
@@ -66,7 +73,7 @@ struct MainView: View {
         HStack(alignment: .center, spacing: 20) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("VIRTUAL CONDUCTOR").font(.system(size: 10, weight: .semibold, design: .rounded)).tracking(2.5).foregroundStyle(accent)
-                Text(model.midiURL?.deletingPathExtension().lastPathComponent ?? "Your rehearsal, your entrance")
+                Text(model.museScore.connected ? model.museScore.name : (model.midiURL?.deletingPathExtension().lastPathComponent ?? "Your rehearsal, your entrance"))
                     .font(.system(size: 21, weight: .medium)).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 12)
@@ -128,6 +135,7 @@ struct MainView: View {
             }
             Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
             HStack(spacing: 10) {
+                Button("MuseScore rehearsal…") { model.pause(); museScoreOpen = true }.disabled(model.locked)
                 Button("Load new exports…") { model.pause(); model.importOpen = true }
                     .disabled([.loading, .starting].contains(model.state))
                 Button("Reread exports", action: model.reload)
