@@ -55,8 +55,11 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.suspend("Display configuration changed.") } })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didHideNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.suspend("Application hidden.") } })
         observers.append(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object:nil, queue:.main) { [weak self] note in
-            guard let window = note.object as? NSWindow, window.title == "Virtual Conductor" else { return }
-            Task { @MainActor in self?.suspend("Performance window closed."); self?.audio.shutdown() }
+            // The observer is delivered synchronously on the main queue.
+            MainActor.assumeIsolated {
+                guard let window = note.object as? NSWindow, window.title == "Virtual Conductor" else { return }
+                self?.suspend("Performance window closed."); self?.audio.shutdown()
+            }
         })
         observers.append(NotificationCenter.default.addObserver(forName: NSWindow.didMiniaturizeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.suspend("Performance window minimized.") } })
     }

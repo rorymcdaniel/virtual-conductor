@@ -1,6 +1,8 @@
 # Virtual Conductor
 
-Native offline macOS rehearsal app built with SwiftUI, AppKit, AVAudioEngine and Core Audio. Requires macOS 15 or later and Xcode with Swift 6.
+Native offline macOS rehearsal app built with SwiftUI, AppKit, AVAudioEngine and Core Audio. Requires macOS 27.2 or later, macOS SDK 27.0 or later, and Swift 6.4 or later (validated with Xcode 27.1). The core library uses Swift 6 concurrency checking; the app remains in Swift 5 mode pending migration of audio-buffer transfers.
+
+The compiler deployment target is 27.0, the highest accepted by the installed SDK; the app bundle and executable enforce the supported macOS 27.2 runtime minimum. Use the build script to validate the host and SDK minimums.
 
 Follow a MIDI tempo map with a traced conducting pattern while playing a matching WAV accompaniment. Configure cadenza stops and cue prepared returns with a right-arrow pedal. Record and review a solo interpretation, then export its WAV and approved tempo CSV.
 

@@ -39,15 +39,19 @@ final class AudioDevices {
         return id
     }
     static func bind(_ node: AVAudioIONode, device: AudioDeviceID) throws {
-        guard let unit = node.audioUnit else { throw NativeError.message("Audio device unit unavailable.") }
-        var id = device
-        let result = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout.size(ofValue: id)))
-        guard result == noErr else { throw NativeError.message("Could not select audio device (\(result)).") }
+        try node.withAudioUnit { unit in
+            guard let unit else { throw NativeError.message("Audio device unit unavailable.") }
+            var id = device
+            let result = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout.size(ofValue: id)))
+            guard result == noErr else { throw NativeError.message("Could not select audio device (\(result)).") }
+        }
     }
     static func boundID(_ node: AVAudioIONode) -> AudioDeviceID {
-        guard let unit = node.audioUnit else { return 0 }
-        var id: AudioDeviceID = 0, size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        _ = AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, &size)
-        return id
+        node.withAudioUnit { unit in
+            guard let unit else { return 0 }
+            var id: AudioDeviceID = 0, size = UInt32(MemoryLayout<AudioDeviceID>.size)
+            _ = AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, &size)
+            return id
+        }
     }
 }

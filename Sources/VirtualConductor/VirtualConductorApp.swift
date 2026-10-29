@@ -1,6 +1,13 @@
 import SwiftUI
 
 @main struct VirtualConductorApp: App {
+    init() {
+        // The installed SDK only accepts deployment targets through 27.0.
+        // Enforce the supported runtime for direct executable launches as well.
+        guard #available(macOS 27.2, *) else {
+            fatalError("Virtual Conductor requires macOS 27.2 or later.")
+        }
+    }
     @StateObject private var model = PerformanceModel()
     @State private var keys: PerformanceKeys?
     var body: some Scene {

@@ -100,9 +100,9 @@ final class PreparedPerformance {
         engine = AVAudioEngine(); music = AVAudioPlayerNode(); clicks = AVAudioPlayerNode(); auxiliary = AVAudioPlayerNode()
         try AudioDevices.bind(engine.outputNode, device: device.id)
         engine.attach(music); engine.attach(clicks); engine.attach(auxiliary)
-        engine.connect(music, to: engine.mainMixerNode, format: format)
-        engine.connect(clicks, to: engine.mainMixerNode, format: AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1))
-        engine.connect(auxiliary, to: engine.mainMixerNode, format: AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1))
+        try engine.connectNode(music, to: engine.mainMixerNode, format: format)
+        try engine.connectNode(clicks, to: engine.mainMixerNode, format: AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1))
+        try engine.connectNode(auxiliary, to: engine.mainMixerNode, format: AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1))
         self.device = device; self.format = format
         engine.mainMixerNode.outputVolume = volume; clicks.volume = clicksEnabled ? 1 : 0
         engine.prepare(); try engine.start()
@@ -119,7 +119,13 @@ final class PreparedPerformance {
         let at = AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: host))
         music.scheduleBuffer(segment.music, at: nil)
         clicks.scheduleBuffer(segment.clicks, at: nil)
-        music.play(at: at); clicks.play(at: at)
+        do {
+            try music.playAudio(at: at)
+            try clicks.playAudio(at: at)
+        } catch {
+            stop()
+            throw error
+        }
         // presentationLatency includes downstream output latency; never add device latency again.
         audibleOrigin = host + engine.outputNode.presentationLatency - segment.position
     }
@@ -140,7 +146,7 @@ final class PreparedPerformance {
             let x = Double(i)*sampleRate/target.sampleRate, a = min(samples.count-1,Int(x)), b = min(samples.count-1,a+1)
             buffer.floatChannelData![0][i] = samples[a] + Float(x-Double(a))*(samples[b]-samples[a])
         }
-        auxiliary.scheduleBuffer(buffer, at: nil); auxiliary.play()
+        auxiliary.scheduleBuffer(buffer, at: nil); try auxiliary.playAudio()
         auxiliaryOrigin = Self.hostSeconds + engine.outputNode.presentationLatency
     }
     func testTone() throws {
