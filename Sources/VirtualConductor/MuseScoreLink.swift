@@ -8,6 +8,7 @@ struct RehearsalFiles {
     let score: URL
     let midi: URL
     let wav: URL
+    let musicXML: URL
 }
 struct TempoPoint: Codable, Equatable {
     let quarter: Double
@@ -29,8 +30,14 @@ struct TempoPoint: Codable, Equatable {
     private var previewPoints: [TempoPoint] = []
     private var previewRange: PassageRange?
     let root: URL
-    private let executable = URL(fileURLWithPath: "/Applications/MuseScore 4.app/Contents/MacOS/mscore")
-    init(root: URL? = nil) {
+    private let executable: URL
+    private let renderExtensionFolder: URL
+    init(root: URL? = nil,
+         executable: URL = URL(fileURLWithPath: "/Applications/MuseScore 4.app/Contents/MacOS/mscore"),
+         renderExtensionFolder: URL? = nil) {
+        self.executable = executable
+        self.renderExtensionFolder = renderExtensionFolder ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/MuseScore/MuseScore4/extensions/virtual-conductor-render")
         self.root = root ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Documents/MuseScore4/VirtualConductor", isDirectory: true)
         if let path = UserDefaults.standard.string(forKey: "MuseScoreSourcePath") { sourceURL = URL(fileURLWithPath: path) }
@@ -162,7 +169,7 @@ struct TempoPoint: Codable, Equatable {
         }.value
     }
     private func transform(source: URL, destination: URL, body: String) async throws {
-        let extensionFolder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/MuseScore/MuseScore4/extensions/virtual-conductor-render")
+        let extensionFolder = renderExtensionFolder
         try FileManager.default.createDirectory(at: extensionFolder, withIntermediateDirectories: true)
         let manifest: [String: Any] = ["uri":"musescore://extensions/virtualconductor/render", "type":"composite", "title":"Virtual Conductor render", "ui_context":"Any", "actions":[["code":"render", "type":"macros", "path":"render.js", "show_on_appmenu":false]]]
         try JSONSerialization.data(withJSONObject: manifest).write(to: extensionFolder.appendingPathComponent("manifest.json"), options: .atomic)
@@ -174,12 +181,24 @@ struct TempoPoint: Codable, Equatable {
     }
     private func export(score: URL) async throws -> RehearsalFiles {
         let midi = score.deletingPathExtension().appendingPathExtension("mid"), wav = score.deletingPathExtension().appendingPathExtension("wav")
+        let musicXML = score.deletingPathExtension().appendingPathExtension("musicxml")
         try await process([score.path,"-o",midi.path], log: score.deletingPathExtension().appendingPathExtension("midi.log"))
         try await process([score.path,"-o",wav.path], log: score.deletingPathExtension().appendingPathExtension("wav.log"))
+        let musicXMLLog = score.deletingPathExtension().appendingPathExtension("musicxml.log")
+        do {
+            try await process([score.path,"-o",musicXML.path], log: musicXMLLog)
+            let data = try Data(contentsOf: musicXML)
+            guard !data.isEmpty else { throw MusicalError("The XML document is empty.") }
+            let parser = XMLParser(data: data)
+            parser.shouldResolveExternalEntities = false
+            guard parser.parse() else { throw MusicalError(parser.parserError?.localizedDescription ?? "The XML document is malformed.") }
+        } catch {
+            throw MusicalError("MuseScore MusicXML export failed. Your previous rehearsal is retained. Output: \(musicXML.path). Details: \(musicXMLLog.path). \(error.localizedDescription)")
+        }
         _ = try MIDIFile(data: Data(contentsOf: midi))
         let file = try AVAudioFile(forReading: wav)
         guard file.length > 0 else { throw MusicalError("MuseScore exported empty audio. Your previous rehearsal is retained.") }
-        return RehearsalFiles(score: score, midi: midi, wav: wav)
+        return RehearsalFiles(score: score, midi: midi, wav: wav, musicXML: musicXML)
     }
     private func process(_ arguments: [String], log: URL) async throws {
         let executable = executable
