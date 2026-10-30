@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<score-partwise version="4.0">
+  <part-list><score-part id="Solo"><part-name>Cello</part-name></score-part></part-list>
+  <part id="Solo">
+    <measure number="10">
+      <attributes><divisions>3</divisions><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>12</duration><tie type="start"/><voice>1</voice><type>whole</type><notations><tied type="start"/></notations></note>
+      <backup><duration>12</duration></backup>
+      <note><rest/><duration>1</duration><voice>2</voice><type>eighth</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes><normal-type>eighth</normal-type></time-modification><notations><tuplet type="start" number="1"/></notations></note>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><tie type="start"/><voice>2</voice><type>quarter</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes><normal-type>eighth</normal-type></time-modification><notations><tied type="start"/><tuplet type="stop" number="1"/></notations></note>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>9</duration><tie type="stop"/><tie type="start"/><voice>2</voice><type>half</type><dot/><notations><tied type="stop"/><tied type="start"/></notations></note>
+    </measure>
+    <measure number="11">
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>12</duration><tie type="stop"/><tie type="start"/><voice>1</voice><type>whole</type><notations><tied type="stop"/><tied type="start"/></notations></note>
+      <backup><duration>12</duration></backup>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>3</duration><tie type="stop"/><voice>2</voice><type>quarter</type><notations><tied type="stop"/></notations></note>
+      <note><rest/><duration>9</duration><voice>2</voice><type>half</type><dot/></note>
+    </measure>
+    <measure number="12">
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>3</duration><tie type="stop"/><voice>1</voice><type>quarter</type><notations><tied type="stop"/></notations></note>
+      <note><rest/><duration>9</duration><voice>1</voice><type>half</type><dot/></note>
+    </measure>
+  </part>
+</score-partwise>
