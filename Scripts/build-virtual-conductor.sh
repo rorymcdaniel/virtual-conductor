@@ -23,5 +23,7 @@ for bundle in "$BIN"/*.bundle; do
     if [ -d "$bundle" ]; then cp -R "$bundle" "$APP/Contents/Resources/"; fi
 done
 cp AppResources/VirtualConductor/Info.plist "$APP/Contents/Info.plist"
-codesign --force --sign - "$APP"
+# Local builds default to ad hoc signing. Set a persistent signing identity
+# when available so macOS can recognize subsequent microphone-enabled builds.
+codesign --force --sign "${VC_SIGNING_IDENTITY:--}" "$APP"
 printf '%s\n' "$APP"
