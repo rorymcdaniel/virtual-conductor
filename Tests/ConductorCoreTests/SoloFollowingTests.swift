@@ -388,9 +388,11 @@ final class SoloFollowingTests: XCTestCase {
         let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()
-        XCTAssertEqual(following.status, .waiting)
+        XCTAssertEqual(following.status, .following)
         following.observe(pitch: 60, time: now); following.observe(pitch: 60, time: now + 0.03)
         following.observe(pitch: nil, time: 1); following.observe(pitch: nil, time: 1.03)
+        now = 1.1; following.tick()
+        XCTAssertEqual(following.status, .following)
         now = 40; following.observe(pitch: nil, time: now); following.tick()
         XCTAssertEqual(audio.played.count, 1); XCTAssertEqual(following.status, .waiting)
         for pitch in [62,64,65,60,62,64,65,60] {

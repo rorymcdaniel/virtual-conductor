@@ -67,6 +67,9 @@ implementation is available through **Live following…** in the app.
 - Clearly distinguish "Waiting for you" during a recognized deliberate pause
   from "Tracking lost" when the app is uncertain of the soloist's position.
   Both states must be prominent and readable while playing.
+  Entering an automatic solo passage keeps the ordinary Following display.
+  After a matched note releases, allow the written rest and one beat for a
+  breath before displaying a wait. Explicit wait points still cue immediately.
 - Following must tolerate occasional wrong or missed notes by recognizing
   position from the surrounding phrase. At an explicit wait point, the
   expected entrance remains required unless the performer uses Right Arrow.

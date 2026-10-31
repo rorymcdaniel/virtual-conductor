@@ -154,7 +154,7 @@ struct FollowingConfiguration: Codable {
             let carriesPhrase = fromAccompaniment && entered - tracker.lastMatch < 0.4 &&
                 tracker.index.map { plan.notes[$0].endQuarter >= q - 1e-7 && plan.notes[$0].startQuarter <= q + 1e-7 } == true
             if !carriesPhrase { tracker.reset(notes: plan.notes, quarter: q) }
-            status = carriesPhrase ? .following : .waiting
+            status = .following
             detail = "Solo passage · play freely · Right Arrow cues the return"; return
         }
         guard let buffer = buffers[location] else { throw MusicalError("Following playback boundary is unavailable. Reset and start again.") }
@@ -228,14 +228,22 @@ struct FollowingConfiguration: Codable {
             case .free(let range):
                 if now - lastObservation > 0.5 { status = .lost; return }
                 guard let index = tracker.index else {
-                    if lastPitch != nil { status = .lost }
+                    if lastPitch != nil && now - entered > 0.4 { status = .lost }
                     return
                 }
                 let note = plan.notes[index]
                 if note.startQuarter >= range.end - 1e-7 { try returnFromFree(range); return }
                 let followingNote = index + 1 < plan.notes.count ? plan.notes[index + 1] : nil
                 if now - tracker.lastMatch > 0.7 && lastPitch != nil { status = .lost }
-                else if status != .lost || now - tracker.lastMatch < 0.3 { status = lastPitch == nil ? .waiting : .following }
+                else if status != .lost || now - tracker.lastMatch < 0.3 {
+                    // Allow the written rest and one beat of breathing room before
+                    // treating silence in a recognized phrase as a deliberate pause.
+                    let next = min(followingNote?.startQuarter ?? range.end, range.end)
+                    let rest = max(0, seconds(next) - seconds(note.endQuarter))
+                    let beat = seconds(next + 1) - seconds(next)
+                    let paused = tracker.releasedAt.map { now - $0 > rest + beat } ?? false
+                    status = lastPitch == nil && paused ? .waiting : .following
+                }
                 if status == .lost { return }
                 if note.endQuarter > range.end + 1e-7 {
                     position = max(seconds(range.start), min(seconds(range.end), seconds(note.startQuarter) + max(0, now - tracker.lastAttack) * tracker.rate))
