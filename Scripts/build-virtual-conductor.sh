@@ -23,7 +23,11 @@ for bundle in "$BIN"/*.bundle; do
     if [ -d "$bundle" ]; then cp -R "$bundle" "$APP/Contents/Resources/"; fi
 done
 cp AppResources/VirtualConductor/Info.plist "$APP/Contents/Info.plist"
-# Local builds default to ad hoc signing. Set a persistent signing identity
-# when available so macOS can recognize subsequent microphone-enabled builds.
-codesign --force --sign "${VC_SIGNING_IDENTITY:--}" "$APP"
+# Use a consistent identity so local updates retain microphone permission.
+# An explicit override also resolves machines with multiple developers.
+identity="${VC_SIGNING_IDENTITY:-}"
+if [[ -z "$identity" ]]; then
+    identity="$(security find-identity -v -p codesigning | awk '/"Apple Development:/ { hash=$2; count++ } END { if (count==1) print hash }')"
+fi
+codesign --force --sign "${identity:--}" "$APP"
 printf '%s\n' "$APP"
