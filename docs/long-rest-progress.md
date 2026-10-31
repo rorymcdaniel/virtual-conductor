@@ -85,3 +85,13 @@ Additional native checks: threshold9 changed availability to no qualifying rests
 ## Owner delivery clarification — 2026-10-31
 
 The owner instructed: “All PRs should be merged. They are a way to review history, not for me to approve.” This supersedes the historical draft-only restrictions above and in the exported handoff. Technical review remains agent-owned; instrument-playing UAT remains owner-owned. Merge export #2 and reader #3 first, retarget continuation #4 to main, then merge it while preserving original implementation commits. Required checks and protections still apply. All three candidates had independent technical approval; no additional source changes are introduced for delivery.
+
+## Merged delivery — 2026-10-31
+
+All three PRs merged under the owner's clarified authorization:
+
+- #2: `321ea4b372c0bda18d421202ecb7715da08d1131`.
+- #3: `2376497a9c12acee173dc310ee8c2f0e27aa2d7f`.
+- #4, retargeted to main: `f574ce1845c5016b8d840c1b725cbae3c59fa6e7`.
+
+The final merge tree equals candidate `5792604cbdbab0285bb247b45b9f0ae3a029e0ce` exactly. Production source and tests are unchanged from independently verified `10230a18c6bf6bfe7338a071bd77fe2ede018fe1`; subsequent edits only record delivery. No redundant test rerun was necessary. GitHub reported no required check rollups, and normal merges succeeded without bypassing protection. Main checkout fast-forwarded to the merged delivery. Earlier draft-only statements above describe the historical authorization and no longer govern delivery.
