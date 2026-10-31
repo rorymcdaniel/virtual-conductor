@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<score-partwise version="4.0">
+  <part-list>
+    <score-part id="Solo"><part-name>Keys</part-name></score-part>
+    <score-part id="Other"><part-name>Keys</part-name></score-part>
+  </part-list>
+  <part id="Solo">
+    <measure number="1">
+      <attributes><divisions>2</divisions><time><beats>4</beats><beat-type>4</beat-type></time><staves>2</staves></attributes>
+      <note><rest/><duration>4</duration><voice>1</voice><staff>1</staff></note>
+      <note><pitch><step>E</step><octave>5</octave></pitch><duration>2</duration><voice>1</voice><staff>1</staff></note>
+      <note><rest/><duration>2</duration><voice>1</voice><staff>1</staff></note>
+      <backup><duration>8</duration></backup>
+      <note><pitch><step>C</step><octave>5</octave></pitch><duration>8</duration><tie type="start"/><voice>2</voice><staff>1</staff></note>
+      <backup><duration>8</duration></backup>
+      <note><pitch><step>C</step><octave>3</octave></pitch><duration>8</duration><voice>3</voice><staff>2</staff></note>
+    </measure>
+    <measure number="2">
+      <note><rest measure="yes"/><duration>8</duration><voice>1</voice><staff>1</staff></note>
+      <backup><duration>8</duration></backup>
+      <note><pitch><step>C</step><octave>5</octave></pitch><duration>4</duration><tie type="stop"/><voice>2</voice><staff>1</staff></note>
+      <note><rest/><duration>4</duration><voice>2</voice><staff>1</staff></note>
+      <backup><duration>8</duration></backup>
+      <note><pitch><step>C</step><octave>3</octave></pitch><duration>8</duration><voice>3</voice><staff>2</staff></note>
+    </measure>
+    <measure number="3">
+      <note><rest measure="yes"/><duration>8</duration><voice>1</voice><staff>1</staff></note>
+      <backup><duration>8</duration></backup>
+      <note><rest measure="yes"/><duration>8</duration><voice>2</voice><staff>1</staff></note>
+      <backup><duration>8</duration></backup>
+      <note><pitch><step>C</step><octave>3</octave></pitch><duration>8</duration><voice>3</voice><staff>2</staff></note>
+    </measure>
+    <measure number="4">
+      <note><rest/><duration>6</duration><voice>1</voice><staff>1</staff></note>
+      <note><pitch><step>E</step><octave>5</octave></pitch><duration>2</duration><voice>1</voice><staff>1</staff></note>
+      <backup><duration>8</duration></backup>
+      <note><rest/><duration>5</duration><voice>2</voice><staff>1</staff></note>
+      <note><pitch><step>C</step><octave>5</octave></pitch><duration>3</duration><voice>2</voice><staff>1</staff></note>
+      <note><chord/><pitch><step>G</step><octave>5</octave></pitch><duration>3</duration><voice>2</voice><staff>1</staff></note>
+      <backup><duration>8</duration></backup>
+      <note><pitch><step>C</step><octave>3</octave></pitch><duration>8</duration><voice>3</voice><staff>2</staff></note>
+    </measure>
+  </part>
+  <part id="Other">
+    <measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes><note><pitch><step>G</step><octave>3</octave></pitch><duration>4</duration></note></measure>
+    <measure number="2"><note><pitch><step>G</step><octave>3</octave></pitch><duration>4</duration></note></measure>
+    <measure number="3"><note><pitch><step>G</step><octave>3</octave></pitch><duration>4</duration></note></measure>
+    <measure number="4"><note><pitch><step>G</step><octave>3</octave></pitch><duration>4</duration></note></measure>
+  </part>
+</score-partwise>

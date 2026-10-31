@@ -8,10 +8,10 @@ This feature is integrated into Virtual Conductor and ready for personal testing
 2. Open and save your native `.mscz` score in MuseScore 4.7.6. Set its accompaniment mix as desired.
 3. In Virtual Conductor, choose **MuseScore rehearsal… → Install / update MuseScore companion**.
 4. In MuseScore, use **Plugins → Manage plugins → Reload plugins**, enable **Virtual Conductor**, then run it from the Plugins menu. Leave its small connection window open.
-5. In Virtual Conductor, choose the saved score and **Prepare rehearsal**. Preparation checks the open score against the saved file and creates matching MIDI and WAV automatically.
+5. In Virtual Conductor, choose the saved score and **Prepare rehearsal**. Preparation checks the open score against the saved file and creates matching MIDI, WAV and MusicXML automatically.
 6. Choose **Record interpretation…**, choose a passage and microphone, then record without accompaniment. Select the solo part and **Analyze take**, or use manual endpoints if needed.
 7. Choose **Hear accompaniment**. Listen to the selected passage rendered with your timing. Beat-table edits are optional. A changed draft requires another preview.
-8. Choose **Keep it**. The companion changes the open MuseScore score as one undoable action. The app adopts the preview's MIDI/WAV and retains your take and cadenza settings. Save in MuseScore when ready.
+8. Choose **Keep it**. The companion changes the open MuseScore score as one undoable action. The app adopts the preview's MIDI/WAV/MusicXML and retains your take and cadenza settings. Save in MuseScore when ready.
 
 Recording another take or closing the recording window without Keep does not apply the draft to MuseScore. Keep leaves the native score unsaved so normal Save and Undo remain yours. If you edit or undo in MuseScore, save and prepare again to refresh the app.
 
@@ -21,7 +21,7 @@ Recording another take or closing the recording window without Keep does not app
 - Visible, text-following tempo markings. Existing tempo text in the passage is replaced. The original effective tempo is restored at its end.
 - Gradual tempo changes wholly inside the passage are removed. A gradual change crossing a passage boundary is refused rather than altering outside music.
 - Requests have IDs and expire; Keep checks that the same score is selected and its musical content matches the prepared revision. It does not retry a failed Keep automatically.
-- Export failure retains the prior rehearsal. Preparation and rendering run separate MuseScore processes for MIDI and WAV.
+- Export failure retains the prior rehearsal. Preparation and rendering run separate bounded MuseScore processes for MIDI, WAV and MusicXML. A missing or invalid MusicXML export prevents publication of the replacement bundle.
 
 Repeats, jumps, and pickup bars are not yet supported for Keep and produce a specific message. Preparation/playback can still use the saved exports. The main MIDI reader also requires 4/4. These limits are temporary implementation limits, not changes to the intended product behavior.
 
@@ -43,3 +43,36 @@ Still needs testing with your music and hardware:
 The score signature tracks notes, durations, tempo text, and spanners. It is not a complete document hash: mixer, layout, some articulations and other properties are not represented. After changing those, save and prepare again before preview/Keep. A timeout after Keep may mean MuseScore applied it but the reply was lost; inspect the score before retrying.
 
 The source file is never rewritten by Virtual Conductor. Preview snapshots and export logs are retained under `~/Documents/MuseScore4/VirtualConductor/` for diagnosis. The app has no cache cleanup yet. The companion is installed under `~/Documents/MuseScore4/Plugins/VirtualConductor/`; custom MuseScore plugin directories require moving it there manually. The render helper lives under MuseScore's Application Support extensions directory.
+
+## Long-rest cues
+
+Prepare a rehearsal, then choose **Solo staff** and a positive **Long rest** threshold in full measures. A multi-staff instrument lists its staves separately. Choose the one containing your music; the app does not infer it from a MIDI track. Changing staff or threshold recomputes cues without changing music or audio.
+
+Manual **Load new exports…** also accepts an optional matching uncompressed MusicXML file. All three files must come from the same score snapshot. MIDI/WAV alone continue to play, with a message explaining why long-rest cues are unavailable. Score replacement clears staff selection when its association cannot be established. Keeping an interpretation refreshes cues from the matching preview exports and current tempo map.
+
+Cues support a linear, constant-4/4 score without pickups. Unsupported repeats, jumps, meter changes or unestablished MusicXML-to-MIDI mapping disable cues with a reason. The mapping check is conservative; it may reject playback ornaments or other exports whose note positions differ. Cross-staff tie continuations without a matching MIDI attack are conservatively unavailable. It does not expand repeats or follow the soloist.
+
+A qualifying rest displays a counter from its first full resting measure, even before the threshold has elapsed in playback. Eight full resting measures show **1/8** through **8/8**. If the next entrance is measure 9 beat 3.5, the count stays **8/8** through the partial rest, the entrance cue begins at beat 3, and the count ends at the entrance. There is no ninth full resting measure, earlier preparatory cue or invented entrance after a trailing rest.
+
+### Owner trial
+
+Use the generated synthetic passage described in [Long-rest fixture](long-rest-fixture.md), then try your own supported score. Select the solo staff, set threshold eight, and play with normal preparation. Check the count during all eight full rests. Look away for two or three measures while holding your instrument, then look back and recover your place. In measure 9, check that the cue begins on beat 3 before the and-of-3 entrance. Repeat with controls hidden (H) and in full screen. Try pause/resume and reset/replay.
+
+Judge readability from your normal playing distance, whether the cue attracts attention, and whether its placement obscures the conductor or measure number. Size, placement and prominence remain adjustable. This trial evaluates usability; automated timing checks cannot establish soloist readability.
+
+### Verification of the long-rest implementation
+
+Source candidate `10230a18c6bf6bfe7338a071bd77fe2ede018fe1` was independently reviewed for musical correctness and code quality, then independently verified: all three returned `ready: true`. The final warnings-as-errors suite passed 75 tests with one existing opt-in device skip, and the app build passed. Actual MuseScore exports were checked against the production parser, setup and display. A missing solo MIDI track is rejected instead of allowing accompaniment to justify the entrance.
+
+Native app playback through the direct-file loader was exercised with the generated bundle. Screenshots showed preparation without a rest count, 1/8, 4/8, 8/8, and the measure-9 Beat 3 entrance cue followed by its removal. Clean-mode pause held 2/8 while stopped; full-screen showed the counter separately from the center measure and conductor, and resume worked. Exact partial-measure and cue boundaries are established by automated tests/probes; screen captures are observations, not timing measurements. Physical sound quality and instrument-playing readability were not established.
+
+The native file dialog stalled under automation after selecting a valid file, so its confirmation path remains unverified. Type-filter and asynchronous-presentation experiments did not establish a fix and were removed. Direct loading is a verified alternative; quit any running app instance first, then run from this checkout:
+
+```sh
+'.build/virtual-conductor/Virtual Conductor.app/Contents/MacOS/VirtualConductor' \
+  /tmp/vc-long-rest-fixture-final/long-rest.mid \
+  /tmp/vc-long-rest-fixture-final/long-rest.wav \
+  /tmp/vc-long-rest-fixture-final/long-rest.musicxml
+```
+
+The third argument is optional. It follows the same parsing, timeline checks and manual staff-selection flow as normal loading. For your own exports, substitute their three matching paths. The native MuseScore companion/Keep interaction was not newly exercised; automated Keep propagation and failure checks passed. See [durable progress and review evidence](long-rest-progress.md) for recovery history and exact checks.

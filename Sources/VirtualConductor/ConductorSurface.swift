@@ -50,6 +50,34 @@ struct ConductorSurface: NSViewRepresentable {
             text("Awaiting pedal · →",y:h*0.46+74,size:19,color:.systemMint)
             return
         }
+        if !model.utilityOpen {
+            let rest = LongRestDisplay(snapshot: snapshot, schedule: model.longRestSetup.schedule)
+            let numberSize = min(64, max(38, h * 0.13))
+            if let counter = rest.counter {
+                let number = NSAttributedString(string: counter, attributes: [
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: numberSize, weight: .semibold),
+                    .foregroundColor: NSColor.systemMint
+                ])
+                number.draw(at: CGPoint(x: 24, y: 6))
+                NSAttributedString(string: "REST MEASURES", attributes: [
+                    .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                    .foregroundColor: NSColor.secondaryLabelColor
+                ]).draw(at: CGPoint(x: 26, y: numberSize + 12))
+            }
+            if let beat = rest.cueBeat {
+                let box = NSRect(x: w - 236, y: 12, width: 212, height: 70)
+                NSColor.systemMint.setFill()
+                NSBezierPath(roundedRect: box, xRadius: 12, yRadius: 12).fill()
+                NSAttributedString(string: "ENTRANCE", attributes: [
+                    .font: NSFont.systemFont(ofSize: 25, weight: .bold),
+                    .foregroundColor: NSColor.black
+                ]).draw(at: CGPoint(x: box.minX + 18, y: box.minY + 8))
+                NSAttributedString(string: "Beat \(beat)", attributes: [
+                    .font: NSFont.systemFont(ofSize: 16, weight: .medium),
+                    .foregroundColor: NSColor.black
+                ]).draw(at: CGPoint(x: box.minX + 18, y: box.minY + 42))
+            }
+        }
         if model.guide {
             let path = NSBezierPath(); path.lineWidth = 1; path.setLineDash([3,7],count:2,phase:0)
             for beat in 0..<4 { for n in 0...80 { let point = xy(ConductorGeometry.point(beat:beat,phase:Double(n)/80)); if n == 0 { path.move(to:point) } else { path.line(to:point) } } }
