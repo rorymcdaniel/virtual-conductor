@@ -75,3 +75,9 @@ Tested source candidate: `10230a18c6bf6bfe7338a071bd77fe2ede018fe1`; baseline `b
 - Owner trial and launch command are in `docs/musescore-rehearsal.md`; fixture generation in `docs/long-rest-fixture.md`.
 
 Delivery preserves draft PR #2 and #3 and all recovered implementation ancestry. Main remains at the baseline. No PR merge, auto-merge, ready-for-review change or Chopin lifecycle action is authorized or performed.
+
+## Delivery
+
+Draft continuation PR: https://github.com/rorymcdaniel/virtual-conductor/pull/4, base `chopin/implement-b8daddcd` (retained integration). Existing drafts https://github.com/rorymcdaniel/virtual-conductor/pull/2 and https://github.com/rorymcdaniel/virtual-conductor/pull/3 remain open and reused. Branch `codex/long-rest-cues` pushed. Delivery commits after source `10230a1` contain documentation only.
+
+Additional native checks: threshold9 changed availability to no qualifying rests; restored8; switching to Accompaniment reported no qualifying rests; restored Solo; Reread exports preserved selection and readiness. App left loaded for owner trial. Relative links in README and all new/changed rehearsal documents validated; diff check passed. No repository-hosted CI jobs were present in PR check rollups; local verification is recorded above.
