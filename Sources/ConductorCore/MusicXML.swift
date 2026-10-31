@@ -1,6 +1,6 @@
 import Foundation
 
-public struct MusicXMLStaffID: Hashable, Sendable {
+public struct MusicXMLStaffID: Hashable, Codable, Sendable {
     public let partID: String
     public let staffNumber: Int
 
@@ -19,6 +19,8 @@ public struct MusicXMLStaff: Equatable, Sendable {
     public let id: MusicXMLStaffID
     public let displayName: String
     public let soundingIntervals: [MusicXMLSoundingInterval]
+    /// Concert pitches; -1 denotes a note unsuitable for monophonic following.
+    public var notes: [MIDINote] = []
 }
 
 public struct MusicXMLMeasure: Equatable, Sendable {
@@ -96,6 +98,8 @@ public struct MusicXMLScore: Sendable {
             var divisions: Double?
             var hasMeter = false
             var intervals: [Int: [MusicXMLSoundingInterval]] = [:]
+            var pitches: [Int: [Int: Int]] = [:]
+            var transposition: [Int: Int] = [:]
             var staffNumbers = [1]
             var activeTies: [MusicXMLTieKey: Int] = [:]
             let partMeasures = part.children.filter { $0.name == "measure" }
@@ -113,6 +117,15 @@ public struct MusicXMLScore: Sendable {
                 for element in measure.children {
                     switch element.name {
                     case "attributes":
+                        for transpose in element.children where transpose.name == "transpose" {
+                            let staff = Int(transpose.attributes["number"] ?? "0") ?? 0
+                            guard let chromatic = Int(transpose.child("chromatic")?.text ?? "0"),
+                                  let octave = Int(transpose.child("octave-change")?.text ?? "0"),
+                                  (-48...48).contains(chromatic), (-4...4).contains(octave) else {
+                                throw MusicXMLReadError.malformed("Invalid transposition.")
+                            }
+                            transposition[staff] = chromatic + octave * 12
+                        }
                         if let value = element.child("divisions") { divisions = try value.positiveNumber() }
                         for time in element.children where time.name == "time" {
                             let beats = time.children.filter { $0.name == "beats" }.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -183,6 +196,7 @@ public struct MusicXMLScore: Sendable {
                                     }
                                     activeTies[key] = intervalIndex
                                 }
+                                pitches[staff, default: [:]][intervalIndex] = element.concertPitch(transpose: transposition[staff] ?? transposition[0] ?? 0)
                             }
                             previousOnset = onset
                         } else {
@@ -209,7 +223,11 @@ public struct MusicXMLScore: Sendable {
             }
             for staff in staffNumbers {
                 let displayName = staffNumbers.count == 1 ? name : "\(name) (staff \(staff))"
-                parsedStaves.append(MusicXMLStaff(id: MusicXMLStaffID(partID: id, staffNumber: staff), displayName: displayName, soundingIntervals: intervals[staff] ?? []))
+                let sounding = intervals[staff] ?? []
+                let notes = sounding.enumerated().map { index, interval in
+                    MIDINote(pitch: pitches[staff]?[index] ?? -1, startQuarter: interval.startQuarter, endQuarter: interval.endQuarter)
+                }.sorted { $0.startQuarter < $1.startQuarter }
+                parsedStaves.append(MusicXMLStaff(id: MusicXMLStaffID(partID: id, staffNumber: staff), displayName: displayName, soundingIntervals: sounding, notes: notes))
             }
         }
         guard !parsedStaves.isEmpty, !parsedMeasures.isEmpty else {
@@ -269,6 +287,16 @@ private final class MusicXMLNode {
             return "\(child("instrument")?.attributes["id"] ?? "")|\(unpitched.child("display-step")?.text ?? "")|\(unpitched.child("display-octave")?.text ?? "")"
         }
         throw MusicXMLReadError.malformed("Note has no pitch or rest.")
+    }
+
+    func concertPitch(transpose: Int) -> Int {
+        guard let pitch = child("pitch"), let step = pitch.child("step")?.text,
+              let semitone = ["C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11][step],
+              let octave = Int(pitch.child("octave")?.text ?? ""), (-1...9).contains(octave),
+              let alter = Double(pitch.child("alter")?.text ?? "0"), alter.isFinite,
+              abs(alter) <= 12, alter.rounded() == alter else { return -1 }
+        let value = (octave + 1) * 12 + semitone + Int(alter) + transpose
+        return (0...127).contains(value) ? value : -1
     }
 
 

@@ -85,6 +85,11 @@ final class PreparedPerformance {
     private var music = AVAudioPlayerNode()
     private var clicks = AVAudioPlayerNode()
     private var auxiliary = AVAudioPlayerNode()
+    private var performanceMixer = AVAudioMixerNode()
+    private var timePitch = AVAudioUnitTimePitch()
+    private var clockHost = 0.0
+    private var clockPosition = 0.0
+    private(set) var playbackRate = 1.0
     private(set) var device: AudioDevice?
     private(set) var audibleOrigin = 0.0
     private(set) var auxiliaryOrigin = 0.0
@@ -98,10 +103,14 @@ final class PreparedPerformance {
     func configure(device: AudioDevice, format: AVAudioFormat) throws {
         shutdown()
         engine = AVAudioEngine(); music = AVAudioPlayerNode(); clicks = AVAudioPlayerNode(); auxiliary = AVAudioPlayerNode()
+        performanceMixer = AVAudioMixerNode(); timePitch = AVAudioUnitTimePitch()
         try AudioDevices.bind(engine.outputNode, device: device.id)
         engine.attach(music); engine.attach(clicks); engine.attach(auxiliary)
-        try engine.connectNode(music, to: engine.mainMixerNode, format: format)
-        try engine.connectNode(clicks, to: engine.mainMixerNode, format: AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1))
+        engine.attach(performanceMixer); engine.attach(timePitch)
+        try engine.connectNode(music, to: performanceMixer, format: format)
+        try engine.connectNode(clicks, to: performanceMixer, format: AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1))
+        try engine.connectNode(performanceMixer, to: timePitch, format: format)
+        try engine.connectNode(timePitch, to: engine.mainMixerNode, format: format)
         try engine.connectNode(auxiliary, to: engine.mainMixerNode, format: AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1))
         self.device = device; self.format = format
         engine.mainMixerNode.outputVolume = volume; clicks.volume = clicksEnabled ? 1 : 0
@@ -128,6 +137,22 @@ final class PreparedPerformance {
         }
         // presentationLatency includes downstream output latency; never add device latency again.
         audibleOrigin = host + engine.outputNode.presentationLatency - segment.position
+        clockHost = host + engine.outputNode.presentationLatency + timePitch.latency
+        clockPosition = segment.position
+        audibleOrigin += timePitch.latency
+    }
+    func position(host: Double = PerformanceAudio.hostSeconds) -> Double {
+        clockPosition + max(0, host - clockHost) * playbackRate
+    }
+    func setRate(_ rate: Double) {
+        let now = Self.hostSeconds
+        clockPosition = position(host: now); clockHost = max(now, clockHost)
+        playbackRate = min(4, max(0.25, rate)); timePitch.rate = Float(playbackRate)
+    }
+    /// Appending an already prepared adjacent buffer preserves continuous rendering.
+    func append(_ segment: AudioSegment) {
+        music.scheduleBuffer(segment.music, at: nil)
+        clicks.scheduleBuffer(segment.clicks, at: nil)
     }
     func stop() { music.stop(); clicks.stop(); auxiliary.stop() }
     func shutdown() {

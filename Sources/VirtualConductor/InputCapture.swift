@@ -11,7 +11,12 @@ final class CaptureStorage: @unchecked Sendable {
     let recording = Atomic<Bool>(false)
     let peak = Atomic<Float>(0)
     let receiving = Atomic<Bool>(false)
-    init(rate: Double) { capacity = Int(rate * 120); samples = .allocate(capacity:capacity); samples.initialize(repeating:0,count:capacity) }
+    let stream: LiveSampleBuffer?
+    init(rate: Double, streaming: Bool = false) {
+        stream = streaming ? LiveSampleBuffer() : nil
+        capacity = streaming ? 1 : Int(rate * 120)
+        samples = .allocate(capacity:capacity); samples.initialize(repeating:0,count:capacity)
+    }
     deinit { samples.deallocate() }
     func receive(_ buffer: AVReadOnlyAudioPCMBuffer) {
         receiving.store(true,ordering:.releasing)
@@ -28,6 +33,7 @@ final class CaptureStorage: @unchecked Sendable {
                 if case .float(let channel) = buffer.channelData(c) { value += channel[i * buffer.stride] }
             }
             value /= Float(channelCount); maximum = max(maximum,abs(value))
+            stream?.write(value)
             if capturing && offset < capacity { samples[offset] = value; offset += 1 }
         }
         if capturing { count.store(offset,ordering:.releasing) }
@@ -41,13 +47,13 @@ final class CaptureStorage: @unchecked Sendable {
     private var observer: NSObjectProtocol?
     private var configuration: UInt64 = 0
     var interrupted: (() -> Void)?
-    func enable(device: UInt32) throws {
+    func enable(device: UInt32, streaming: Bool = false) throws {
         release()
         let engine = AVAudioEngine()
         try AudioDevices.bind(engine.inputNode, device:device)
         let format = engine.inputNode.outputFormat(forBus:0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw NativeError.message("The selected device has no usable input.") }
-        let storage = CaptureStorage(rate:format.sampleRate)
+        let storage = CaptureStorage(rate:format.sampleRate, streaming: streaming)
         try engine.inputNode.installAudioTap(onBus:0,bufferSize:1024,format:format) { buffer, _ in storage.receive(buffer) }
         // No connection from the microphone to the output mixer: no monitoring.
         engine.prepare()

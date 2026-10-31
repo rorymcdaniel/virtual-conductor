@@ -40,6 +40,7 @@ struct MainView: View {
             if !model.clean { header }
             ZStack(alignment: .bottomTrailing) {
                 ConductorSurface(model: model)
+                FollowingBanner(following: model.following)
                 if model.clean {
                     Button { model.clean = false } label: {
                         Text("H · Show controls").font(.caption).foregroundStyle(.white.opacity(0.50))
@@ -64,6 +65,7 @@ struct MainView: View {
         }
         .sheet(isPresented: $model.importOpen) { ImportExportsView(model: model) }
         .sheet(isPresented: $model.editorOpen) { CadenzaEditorView(model: model) }
+        .sheet(isPresented: $model.followingOpen) { FollowingView(model: model) }
         .sheet(isPresented: $model.utilityOpen, onDismiss: model.closeRecording) {
             RecordingView(model: model.recording, onClose: model.closeRecording)
         }
@@ -130,7 +132,7 @@ struct MainView: View {
                     .help("Explicitly reconnect the selected output after an interruption")
                 Button("Test output", action: model.testOutput).disabled(model.locked || model.outputMissing)
                 Spacer()
-                Text("Space · play/pause    ArrowRight · cadenza entrance")
+                Text("Space · play/pause    ArrowRight · entrance / return")
                     .font(.caption).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 6) {
@@ -146,7 +148,13 @@ struct MainView: View {
                     }.fixedSize().disabled(model.locked)
                     Spacer()
                 }
-                Text(model.longRestSetup.availability).font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text(model.longRestSetup.availability).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button(model.following.configuration.enabled ? "Live following: on…" : "Live following…") {
+                        model.followingOpen = true
+                    }.disabled(!editable || model.state == .waiting)
+                }
             }
             Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
             HStack(spacing: 10) {
@@ -204,7 +212,7 @@ private struct ImportExportsView: View {
                 .foregroundStyle(.secondary)
             fileRow("MIDI timing", url: midi) { chooseMIDI() }
             fileRow("WAV accompaniment", url: wav) { chooseWAV() }
-            fileRow("MusicXML score (optional, for long-rest cues)", url: musicXML) { chooseMusicXML() }
+            fileRow("MusicXML score (for following and long-rest cues)", url: musicXML) { chooseMusicXML() }
             if musicXML != nil { Button("Remove MusicXML") { musicXML = nil } }
             Text("MusicXML must come from the same score snapshot as the MIDI and WAV. Without it, accompaniment still plays.").font(.caption).foregroundStyle(.secondary)
             Text(model.message).font(.caption).foregroundStyle(model.state == .error ? Color.orange : Color.secondary)

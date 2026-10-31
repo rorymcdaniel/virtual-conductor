@@ -15,11 +15,21 @@ open '.build/virtual-conductor/Virtual Conductor.app'
 
 For the integrated **play → listen → keep** workflow, choose **MuseScore rehearsal…**. See [MuseScore setup and testing status](docs/musescore-rehearsal.md). The first version automates preparation, renders your timing for listening, and applies kept timing to the open MuseScore score with Undo.
 
-Use **Load new exports…** to select a matching MIDI/WAV pair and optional matching MusicXML for long-rest cues. Select one solo staff and a positive full-measure rest threshold. Re-export in MuseScore and use **Reread exports** after changes. Files and takes remain session-scoped. Manual export loading never alters those files. The MuseScore companion changes the open score only when you choose **Keep it**.
+Use **Load new exports…** to select a matching MIDI/WAV pair and optional matching MusicXML for live following and long-rest cues. Select one solo staff and a positive full-measure rest threshold. Re-export in MuseScore and use **Reread exports** after changes. Files and takes remain session-scoped. Manual export loading never alters those files. The MuseScore companion changes the open score only when you choose **Keep it**.
 
 Space plays/pauses, H shows/hides controls, and Right Arrow resumes from a configured cadenza wait. Text entry and modal utilities block performance shortcuts. Output selection is app-local. Recording uses a separate input engine without monitoring; microphone permission is requested when enabling input.
 
 Cadenza settings are stored in `~/Library/Application Support/VirtualConductor/cadenzas-v1.json`, keyed by exact MIDI SHA-256. Browser settings can be imported explicitly through the versioned JSON bridge. Changed MIDI does not inherit old boundaries.
+
+## Live soloist following
+
+Load matching MusicXML with the MIDI and accompaniment WAV, then choose **Live following…**. Select the solo staff and microphone, enable following, and add any explicit wait points by measure and beat. The dialog shows the expected concert pitch from MusicXML. Save and start playback using headphones. The tempo tolerance defaults to ±10% and is configurable globally.
+
+Accompanied passages keep moving within that tolerance. Orchestral silence of at least one measure automatically enables free following through the written solo part, including extreme rubato and pauses. Returns use the planned tempo. Existing configured cadenzas take priority. **Right Arrow** releases an explicit wait or cues the return from a freely followed passage. Turning following off retains fixed playback and existing cadenza controls.
+
+The performance display distinguishes **Waiting for you** from **Tracking lost**, including with controls hidden. Following needs a monophonic pitched solo staff and the existing linear 4/4 MusicXML mapping. Notes are interpreted in concert pitch, including MusicXML transposition. Waits must land on note attacks; rests and tied continuations cannot supply an entrance pitch.
+
+Settings are stored in app preferences for the exact MIDI/MusicXML export pair; changed exports require checking and configuring following again. Live microphone samples stay in bounded memory and are not saved or transmitted. See [behavior, tests, and current limitations](docs/soloist-following.md), particularly recognition latency and real-instrument testing.
 
 ## Interpretation review
 

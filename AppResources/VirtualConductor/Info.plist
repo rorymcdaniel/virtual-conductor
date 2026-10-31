@@ -10,5 +10,5 @@
 <key>CFBundleVersion</key><string>1</string>
 <key>LSMinimumSystemVersion</key><string>27.2</string>
 <key>NSHighResolutionCapable</key><true/>
-<key>NSMicrophoneUsageDescription</key><string>Record your solo interpretation for local timing review and WAV export. Audio stays on this Mac.</string>
+<key>NSMicrophoneUsageDescription</key><string>Listen to your solo playing to follow live entrances and tempo, or record an interpretation for timing review. Audio stays on this Mac.</string>
 </dict></plist>
