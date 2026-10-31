@@ -235,10 +235,10 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         guard let solo = configuration.solo, let prepared else {
             throw MusicalError("Load matching MusicXML and choose your solo staff before enabling live following.")
         }
-        return try FollowingPlan(score: score, solo: solo, waits: configuration.waits, cadenzas: prepared.passages)
+        return try FollowingPlan(score: score, solo: solo, waits: configuration.waits, freePassages: configuration.freePassages, cadenzas: prepared.passages)
     }
     func saveFollowing(_ values: FollowingConfiguration, tolerance: Double) throws {
-        if values.enabled || !values.waits.isEmpty { _ = try followingPlan(configuration: values) }
+        if values.enabled || !values.waits.isEmpty || !values.freePassages.isEmpty { _ = try followingPlan(configuration: values) }
         try following.save(values, tolerance: tolerance)
         longRestSetup.selectStaff(values.solo); followingOpen = false; reset()
     }

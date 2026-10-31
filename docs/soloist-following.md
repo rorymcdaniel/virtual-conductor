@@ -36,13 +36,13 @@ implementation is available through **Live following…** in the app.
   wait when entrance recognition fails.
 - Existing configured cadenza behavior is preserved and takes priority over
   automatic soloist following, allowing the performer to vary a cadenza freely.
-- Automatically identify passages of at least one measure with soloist playing
-  and no orchestra from MusicXML. The performer wants full following in these
-  passages without individually configuring each passage.
+- Free following applies only to unaccompanied passages the performer adds in
+  Live following, using start and return measure and beat. An empty list
+  keeps all unmarked passages on bounded playback, including solo openings.
 - In these passages, free following tracks the performer's position through
   the written solo part, allowing extreme rubato and pauses beyond the global
   tempo tolerance.
-- At the start of an automatically detected solo passage, the clicks end on
+- At the start of a configured solo passage, the clicks end on
   the written boundary. The preceding orchestral sound can ring out in the WAV
   while the conductor follows the soloist. The release ends when the recording
   goes quiet or the next orchestral entrance is reached.
@@ -56,9 +56,6 @@ implementation is available through **Live following…** in the app.
 - Initially, free following is restricted to unaccompanied passages. Manually
   enabling it while orchestral audio is sounding is deferred and may be
   reconsidered after testing.
-- Automatically detected unaccompanied passages have no per-passage opt-out
-  from free following. The soloist controls their pace through playing;
-  explicitly configured cadenza behavior still takes priority.
 - If the app loses the soloist's position during free following, the orchestra
   remains silent until tracking recovers or Right Arrow cues the orchestral
   return. It must not return on a timer while tracking is uncertain.
@@ -67,7 +64,7 @@ implementation is available through **Live following…** in the app.
 - Clearly distinguish "Waiting for you" during a recognized deliberate pause
   from "Tracking lost" when the app is uncertain of the soloist's position.
   Both states must be prominent and readable while playing.
-  Entering an automatic solo passage keeps the ordinary Following display.
+  Entering a configured solo passage keeps the ordinary Following display.
   After a matched note releases, allow the written rest and one beat for a
   breath before displaying a wait. Explicit wait points still cue immediately.
 - Following must tolerate occasional wrong or missed notes by recognizing
@@ -85,7 +82,7 @@ implementation is available through **Live following…** in the app.
   Right Arrow release at configured wait points.
 - Verify bounded tempo changes, continuous playback during loss and recovery
   of tracking, and tolerance of occasional wrong or missed notes.
-- Verify automatic unaccompanied-passage detection, extreme rubato and pauses,
+- Verify configured free-passage boundaries, extreme rubato and pauses,
   planned-tempo return, and silence during uncertain free following.
 - Verify cadenza precedence, following disabled, and visibly distinct waiting
   and tracking-lost states.
@@ -144,7 +141,7 @@ implementation is available through **Live following…** in the app.
 
 ## Reproducible checks
 
-`swift test` covers concert-pitch extraction, automatic free passages, cadenza
+`swift test` covers concert-pitch extraction, configured free passages, cadenza
 precedence, pitch detection with synthetic leakage, bounded tempo and fallback,
 repeated-pitch articulation, capture overflow, and live transport transitions.
 The live transport tests inject a microphone and audio clock; one feeds synthetic
@@ -152,7 +149,7 @@ PCM through the streaming analysis path to release an expected entrance.
 
 For a disposable app fixture, run `python3 Scripts/generate-following-fixture.py`.
 Load the three files in `.build/following-smoke/`, select **Solo**, and enable
-following. Measures 1–2 are unaccompanied; the orchestra enters at measure 3.
+following. Add a free passage from measure 1 beat 1 to measure 3 beat 1. Measures 1–2 are unaccompanied; the orchestra enters at measure 3.
 The written solo repeats C4–D4–E4–F4 in concert pitch. A wait at measure 3, beat 1
 expects C4. No user music is included in this fixture.
 

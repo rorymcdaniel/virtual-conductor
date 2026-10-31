@@ -5,6 +5,11 @@ struct FollowingView: View {
     @ObservedObject var model: PerformanceModel
     @State private var values = FollowingConfiguration()
     @State private var tolerance = 10.0
+    @State private var editingFree = true
+    @State private var startMeasure = "1"
+    @State private var startBeat = "1"
+    @State private var returnMeasure = "2"
+    @State private var returnBeat = "1"
     @State private var measure = 1
     @State private var beat = 1.0
     @State private var error = ""
@@ -31,45 +36,49 @@ struct FollowingView: View {
                 ForEach(model.devices.filter(\.input)) { device in Text(device.name).tag(device.id) }
             }
             Stepper("Global tempo tolerance: ±\(Int(tolerance))%", value: $tolerance, in: 0...75, step: 1)
-            Text("Unaccompanied passages of at least one measure automatically follow freely. Existing cadenzas keep their pedal-controlled behavior and take priority.")
+            Text("Playback follows within this tolerance unless you mark a free passage or a wait. Pedal-controlled cadenzas take priority.")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
-            Text("Wait points").font(.headline)
-            Text("Choose a solo note entrance. Its concert pitch comes from MusicXML. Fractional beats are supported, such as 2.5 for an eighth-note entrance.")
-                .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Text("Measure")
-                TextField("Measure", value: $measure, format: .number).frame(width: 70)
-                Text("Beat")
-                TextField("Beat", value: $beat, format: .number).frame(width: 70)
-                Button("Add wait") {
-                    var proposed = values
-                    proposed.waits.append(WaitPoint(measure: measure, beat: beat))
-                    do {
-                        _ = try model.followingPlan(configuration: proposed)
-                        proposed.waits.sort { $0.quarter < $1.quarter }
-                        values = proposed; error = ""
-                    } catch { self.error = error.localizedDescription }
-                }
-            }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    if values.waits.isEmpty { Text("No explicit wait points.").foregroundStyle(.secondary) }
-                    ForEach(Array(values.waits.enumerated()), id: \.offset) { index, wait in
-                        HStack {
-                            Text("Measure \(wait.measure), beat \(wait.beat.formatted())")
-                            if let plan = try? model.followingPlan(configuration: values),
-                               let note = plan.notes.first(where: { abs($0.startQuarter - wait.quarter) < 1e-7 }) {
-                                Text("· \(pitchName(note.pitch)) concert").foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button("Remove") { values.waits.remove(at: index) }
-                        }
+            Picker("Edit", selection: $editingFree) {
+                Text("Free passages").tag(true)
+                Text("Wait points").tag(false)
+            }.pickerStyle(.segmented)
+            if editingFree {
+                freeEditor
+            } else {
+                Text("Choose a solo note entrance. Its concert pitch comes from MusicXML. Fractional beats are supported, such as 2.5 for an eighth-note entrance.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("Measure")
+                    TextField("Measure", value: $measure, format: .number).frame(width: 70)
+                    Text("Beat")
+                    TextField("Beat", value: $beat, format: .number).frame(width: 70)
+                    Button("Add wait") {
+                        var proposed = values
+                        proposed.waits.append(WaitPoint(measure: measure, beat: beat))
+                        do {
+                            _ = try model.followingPlan(configuration: proposed)
+                            proposed.waits.sort { $0.quarter < $1.quarter }
+                            values = proposed; error = ""
+                        } catch { self.error = error.localizedDescription }
                     }
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(height: 120)
-            if let plan = try? model.followingPlan(configuration: values) {
-                Text("\(plan.freePassages.count) unaccompanied passages detected for free following.").font(.caption)
+                }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if values.waits.isEmpty { Text("No explicit wait points.").foregroundStyle(.secondary) }
+                        ForEach(Array(values.waits.enumerated()), id: \.offset) { index, wait in
+                            HStack {
+                                Text("Measure \(wait.measure), beat \(wait.beat.formatted())")
+                                if let plan = try? model.followingPlan(configuration: values),
+                                   let note = plan.notes.first(where: { abs($0.startQuarter - wait.quarter) < 1e-7 }) {
+                                    Text("· \(pitchName(note.pitch)) concert").foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Remove") { values.waits.remove(at: index) }
+                            }
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(height: 120)
             }
             Text(error).font(.caption).foregroundStyle(.orange).frame(minHeight: 30)
             HStack {
@@ -83,6 +92,53 @@ struct FollowingView: View {
         }.padding(24).frame(width: 620)
             .onAppear { values = model.following.configuration; tolerance = model.following.tolerance; inputID = model.following.inputID }
     }
+    private var freeEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Mark where you want to play freely while the orchestra rests. At Return, bounded playback resumes. Fractional beats are supported.")
+                .font(.callout)
+            Grid(alignment: .leading) {
+                GridRow { Text(""); Text("Measure"); Text("Beat") }
+                GridRow { Text("Start"); TextField("Start measure", text: $startMeasure); TextField("Start beat", text: $startBeat) }
+                GridRow { Text("Return"); TextField("Return measure", text: $returnMeasure); TextField("Return beat", text: $returnBeat) }
+            }.frame(maxWidth: 320)
+            Button("Add free passage") {
+                do {
+                    let start = try location(startMeasure, startBeat)
+                    let end = try location(returnMeasure, returnBeat)
+                    var proposed = values
+                    proposed.freePassages.append(PassageRange(start: start, end: end))
+                    _ = try model.followingPlan(configuration: proposed)
+                    proposed.freePassages.sort { $0.start < $1.start }
+                    values = proposed
+                    error = ""
+                } catch { self.error = error.localizedDescription }
+            }
+            ScrollView {
+                VStack(alignment: .leading) {
+                    if values.freePassages.isEmpty { Text("No free passages.").foregroundStyle(.secondary) }
+                    ForEach(Array(values.freePassages.enumerated()), id: \.offset) { index, passage in
+                        HStack {
+                            Text("\(label(passage.start)) → \(label(passage.end))")
+                            Spacer()
+                            Button("Remove") { values.freePassages.remove(at: index) }
+                        }
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(height: 84)
+        }
+    }
+
+    private func location(_ measure: String, _ beat: String) throws -> Double {
+        guard let m = Int(measure), m >= 1, let b = Double(beat), b >= 1, b < 5 else {
+            throw MusicalError("Enter a positive measure and a beat from 1 up to, but below, 5.")
+        }
+        return WaitPoint(measure: m, beat: b).quarter
+    }
+
+    private func label(_ quarter: Double) -> String {
+        "Measure \(Int(quarter / 4) + 1), beat \((quarter.truncatingRemainder(dividingBy: 4) + 1).formatted())"
+    }
+
     private func pitchName(_ pitch: Int) -> String {
         ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"][pitch % 12] + String(pitch / 12 - 1)
     }

@@ -15,7 +15,7 @@ public struct FollowingPlan: Sendable {
     public let cadenzas: [CompiledCadenza]
     public let end: Double
 
-    public init(score: MusicXMLScore, solo: MusicXMLStaffID, waits: [WaitPoint], cadenzas: [CompiledCadenza]) throws {
+    public init(score: MusicXMLScore, solo: MusicXMLStaffID, waits: [WaitPoint], freePassages requested: [PassageRange] = [], cadenzas: [CompiledCadenza]) throws {
         guard let staff = score.staves.first(where: { $0.id == solo }), !staff.notes.isEmpty else {
             throw MusicalError("Choose a MusicXML solo staff with pitched notes.")
         }
@@ -35,16 +35,22 @@ public struct FollowingPlan: Sendable {
         self.waits = Array(Set(waits.map(\.quarter))).sorted()
         self.cadenzas = cadenzas
         end = score.endQuarter
-        // Union every non-solo staff, including other staves in the solo's part.
+        var gaps = requested.sorted { $0.start < $1.start }
         let accompaniment = score.staves.filter { $0.id != solo }.flatMap(\.soundingIntervals)
-            .sorted { $0.startQuarter < $1.startQuarter }
-        var cursor = 0.0, gaps: [PassageRange] = []
-        for interval in accompaniment {
-            if interval.startQuarter > cursor { gaps.append(PassageRange(start: cursor, end: interval.startQuarter)) }
-            cursor = max(cursor, interval.endQuarter)
+        for (index, range) in gaps.enumerated() {
+            guard range.start >= 0, range.end <= end, range.start < range.end else {
+                throw MusicalError("Choose a start and a later return within the score.")
+            }
+            guard index == 0 || gaps[index - 1].end < range.start else {
+                throw MusicalError("Free passages must be separate. Combine adjoining passages.")
+            }
+            guard notes.contains(where: { $0.startQuarter >= range.start && $0.startQuarter < range.end }) else {
+                throw MusicalError("Include a written solo entrance in the free passage.")
+            }
+            guard !accompaniment.contains(where: { $0.startQuarter < range.end - 1e-7 && $0.endQuarter > range.start + 1e-7 }) else {
+                throw MusicalError("Choose a solo passage where the orchestra rests. The return may be its next entrance.")
+            }
         }
-        if cursor < end { gaps.append(PassageRange(start: cursor, end: end)) }
-        // Cadenza regions override free following. Retain qualifying silence on either side.
         for cadenza in cadenzas {
             gaps = gaps.flatMap { gap -> [PassageRange] in
                 guard cadenza.startQuarter < gap.end, cadenza.returnQuarter > gap.start else { return [gap] }
@@ -54,7 +60,7 @@ public struct FollowingPlan: Sendable {
             }
         }
         freePassages = gaps.filter { gap in
-            gap.end - gap.start >= 4 - 1e-7 && staff.notes.contains { $0.startQuarter >= gap.start && $0.startQuarter < gap.end }
+            staff.notes.contains { $0.startQuarter >= gap.start && $0.startQuarter < gap.end }
         }
     }
 }

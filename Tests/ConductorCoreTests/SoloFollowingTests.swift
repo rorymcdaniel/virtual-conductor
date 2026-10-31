@@ -119,19 +119,39 @@ final class SoloFollowingTests: XCTestCase {
         XCTAssertEqual(tracker.index, 7)
         XCTAssertEqual(tracker.rate, pace, accuracy: 0.04)
     }
-    func testConcertPitchAndAutomaticSilence() throws {
+    func testUnmarkedSoloSilenceUsesBoundedFollowing() throws {
         let score = try FollowingFixture.score(transpose: -7)
         let plan = try FollowingPlan(score: score, solo: FollowingFixture.solo, waits: [WaitPoint(measure: 1, beat: 2)], cadenzas: [])
         XCTAssertEqual(plan.notes.prefix(4).map(\.pitch), [53,55,57,58])
         XCTAssertEqual(plan.waits, [1])
-        XCTAssertEqual(plan.freePassages, [PassageRange(start: 0, end: 8)])
+        XCTAssertTrue(plan.freePassages.isEmpty)
         XCTAssertThrowsError(try FollowingPlan(score: score, solo: FollowingFixture.solo, waits: [WaitPoint(measure: 1, beat: 1.5)], cadenzas: []))
         XCTAssertThrowsError(try FollowingPlan(score: score, solo: FollowingFixture.solo, waits: [WaitPoint(measure: 0, beat: 1)], cadenzas: []))
     }
-    func testCadenzaOverridesAutomaticFreeFollowing() throws {
+    func testOldSettingsPreserveWaitsAndRequireOptInForFreeFollowing() throws {
+        let data = Data(#"{"enabled":true,"waits":[{"measure":2,"beat":1}]}"#.utf8)
+        var config = try JSONDecoder().decode(FollowingConfiguration.self, from: data)
+        XCTAssertTrue(config.enabled)
+        XCTAssertEqual(config.waits, [WaitPoint(measure: 2, beat: 1)])
+        XCTAssertTrue(config.freePassages.isEmpty)
+        let range = PassageRange(start: 1.5, end: 4)
+        config.freePassages = [range]
+        let saved = try JSONEncoder().encode(config)
+        XCTAssertEqual(try JSONDecoder().decode(FollowingConfiguration.self, from: saved).freePassages, [range])
+        let score = try FollowingFixture.score()
+        func plan(_ ranges: [PassageRange]) throws -> FollowingPlan {
+            try FollowingPlan(score: score, solo: FollowingFixture.solo, waits: [], freePassages: ranges, cadenzas: [])
+        }
+        XCTAssertEqual(try plan([range]).freePassages, [range])
+        XCTAssertThrowsError(try plan([range, range]))
+        XCTAssertThrowsError(try plan([PassageRange(start: 7, end: 9)]))
+        XCTAssertThrowsError(try plan([PassageRange(start: 4, end: 2)]))
+    }
+
+    func testCadenzaOverridesConfiguredFreeFollowing() throws {
         let midi = try FollowingFixture.midi()
         let cadenzas = try compileCadenzas([CadenzaPassage(startMeasure: 1, startBeat: 1, returnMeasure: 2, returnBeat: 1)], midi: midi, audioDuration: 8)
-        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: cadenzas)
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: cadenzas)
         XCTAssertEqual(plan.freePassages, [PassageRange(start: 4, end: 8)])
     }
     func testTrackerToleratesWrongAndSkippedNotesWithoutAdvancingOnHeldPitch() throws {
@@ -219,12 +239,12 @@ final class SoloFollowingTests: XCTestCase {
 }
 
 @MainActor final class LiveFollowingTests: XCTestCase {
-    func testRenderedReleaseContinuesWhenAutomaticFreeFollowingBegins() async throws {
+    func testRenderedReleaseContinuesWhenConfiguredFreeFollowingBegins() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         // The written accompaniment ends at 2 seconds, but its WAV still rings.
         let start = 16000, frames = 2000
         for i in 0..<frames { prepared.source.floatChannelData![0][start+i] = 0.1 * Float(frames-i)/Float(frames) }
-        let plan = try FollowingPlan(score: FollowingFixture.score(silentFrom: 1), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentFrom: 1), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 4, end: 12)], cadenzas: [])
         let follower = LiveFollowing(capture: input, permission: { true })
         try await follower.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         let segment = try XCTUnwrap(audio.played.first)
@@ -243,7 +263,7 @@ final class SoloFollowingTests: XCTestCase {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
         let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
-        let plan = try FollowingPlan(score: FollowingFixture.score(sustainAcrossReturn: true), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        let plan = try FollowingPlan(score: FollowingFixture.score(sustainAcrossReturn: true), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()
         for pitch in [60,62,64,65,60,62,64,65] {
@@ -259,7 +279,7 @@ final class SoloFollowingTests: XCTestCase {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
         let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
-        let plan = try FollowingPlan(score: FollowingFixture.score(restAcrossReturn: true), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        let plan = try FollowingPlan(score: FollowingFixture.score(restAcrossReturn: true), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()
         for pitch in [60,62,64,65,60,62,64] {
@@ -279,7 +299,7 @@ final class SoloFollowingTests: XCTestCase {
         var now = 0.0
         let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo,
-                                     waits: [WaitPoint(measure: 1, beat: 2)], cadenzas: [])
+                                     waits: [WaitPoint(measure: 1, beat: 2)], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()
         following.observe(pitch: 60, time: 0.6); following.observe(pitch: 60, time: 0.63)
@@ -328,7 +348,7 @@ final class SoloFollowingTests: XCTestCase {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
         let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
-        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()
         following.observe(pitch: 61, time: now); following.observe(pitch: 61, time: now + 0.03)
@@ -341,7 +361,7 @@ final class SoloFollowingTests: XCTestCase {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var permission: CheckedContinuation<Bool, Never>?
         let following = LiveFollowing(capture: input, permission: { await withCheckedContinuation { permission = $0 } })
-        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         let task = Task { try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0) }
         while permission == nil { await Task.yield() }
         following.stop(); permission?.resume(returning: true)
@@ -385,7 +405,7 @@ final class SoloFollowingTests: XCTestCase {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
         let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
-        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()
         XCTAssertEqual(following.status, .following)
@@ -409,7 +429,7 @@ final class SoloFollowingTests: XCTestCase {
         let prepared = try FollowingFixture.prepared(cadenzas: [CadenzaPassage(startMeasure: 1, startBeat: 1, returnMeasure: 3, returnBeat: 1)])
         var now = 0.0
         let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
-        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [WaitPoint(measure: 1, beat: 1)], cadenzas: prepared.passages)
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [WaitPoint(measure: 1, beat: 1)], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: prepared.passages)
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()
         XCTAssertEqual(following.status, .cadenza)
