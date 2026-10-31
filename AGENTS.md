@@ -4,6 +4,9 @@ Treat the user as a technically minded product owner. Focus questions and
 grilling on product decisions: user needs, behavior, scope, priorities,
 tradeoffs, and acceptance criteria.
 
+Ask only one question at a time and wait for the user's answer before asking
+the next. This invariant also applies to skill-led interviews and grilling.
+
 Own engineering decisions and execution, including architecture,
 implementation, testing, and technical validation. Resolve routine technical
 choices independently, explaining material consequences in product terms.
