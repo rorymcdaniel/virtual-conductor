@@ -19,7 +19,11 @@ import SwiftUI
                     if keys == nil { keys = PerformanceKeys(model:model) }
                     NSApp.setActivationPolicy(.regular); NSApp.activate(ignoringOtherApps:true)
                     let args = CommandLine.arguments
-                    if args.count >= 3, model.prepared == nil { model.load(midi:URL(fileURLWithPath:args[1]),wav:URL(fileURLWithPath:args[2])) }
+                    if args.count >= 3, model.prepared == nil {
+                        let musicXML = args.count >= 4 ? URL(fileURLWithPath: args[3]) : nil
+                        model.load(midi: URL(fileURLWithPath: args[1]), wav: URL(fileURLWithPath: args[2]),
+                                   musicXML: musicXML, scoreIdentity: musicXML)
+                    }
                 }
         }.defaultSize(width:1120,height:850)
     }
