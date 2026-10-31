@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<score-partwise version="4.0">
+  <part-list>
+    <score-part id="Piano"><part-name>Piano</part-name></score-part>
+    <score-part id="Other"><part-name>Piano</part-name></score-part>
+  </part-list>
+  <part id="Piano">
+    <measure number="1">
+      <attributes><divisions>4</divisions><time><beats>4</beats><beat-type>4</beat-type></time><staves>2</staves></attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>16</duration><voice>1</voice><staff>1</staff></note>
+      <note><chord/><pitch><step>E</step><octave>4</octave></pitch><duration>16</duration><voice>1</voice><staff>1</staff></note>
+      <backup><duration>16</duration></backup>
+      <note><rest/><duration>4</duration><voice>2</voice><staff>1</staff></note>
+      <note><pitch><step>G</step><octave>4</octave></pitch><duration>12</duration><voice>2</voice><staff>1</staff></note>
+      <backup><duration>16</duration></backup>
+      <forward><duration>2</duration><voice>5</voice><staff>2</staff></forward>
+      <note><pitch><step>C</step><octave>3</octave></pitch><duration>14</duration><voice>5</voice><staff>2</staff></note>
+    </measure>
+    <measure number="2">
+      <note><rest measure="yes"/><duration>16</duration><voice>1</voice><staff>1</staff></note>
+      <backup><duration>16</duration></backup>
+      <note><rest measure="yes"/><duration>16</duration><voice>5</voice><staff>2</staff></note>
+    </measure>
+  </part>
+  <part id="Other">
+    <measure number="A"><attributes><divisions>2</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes><note><rest measure="yes"/><duration>8</duration></note></measure>
+    <measure number="A"><note><pitch><step>D</step><octave>5</octave></pitch><duration>8</duration></note></measure>
+  </part>
+</score-partwise>
