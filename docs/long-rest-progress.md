@@ -20,12 +20,23 @@ Inspected all three retained run checkouts (b8daddcd, 133185a4, 72b0adc7), all l
 
 Integration branch `codex/long-rest-cues`, isolated checkout `/Users/rory/Code/virtual-conductor-long-rest`.
 
-- Export/reader/schedule: recovered; independent musical and technical reviews underway.
+- Export/reader/schedule: recovered; independent musical and technical reviews passed (`ready: true`).
 - Setup: vc-implementer owns PerformanceModel.swift, MainView.swift, new setup/mapping files and tests.
 - Display: pending setup integration; ownership reserved for separate implementation.
 - Final musical/code reviews and then independent integration verification: pending.
-- Full recovered swift test: running; results to follow.
+- Full recovered `swift test`: 60 tests, 1 existing opt-in device skip, zero failures (2026-10-30).
 
 ## Verification and limitations
 
 No new technical acceptance yet. Native app and MuseScore validation, final build, draft delivery, and owner trial instructions remain pending.
+
+## Recovered slice review evidence
+
+Reviewed base `bac300f6c940bb2ad5def48eebf2753afb98fcc6` and candidate `970150c16bd70b7a1e8507f9c0734d7bbe31c82d`.
+
+- `vc-musical-reviewer`: parser and schedule `ready: true`; 28 targeted tests passed in independent `/tmp/vc-musical-review-build`. Verified selected-staff voice union, sustained notes, threshold boundaries, eight-measure denominator, quarter-34 cue/34.5 entrance, and trailing rests.
+- `vc-code-reviewer`: export, parser and schedule each `ready: true`; 37 targeted tests and `git diff --check` passed in independent `/tmp/vc-review-recovered-build`. No actionable defects; reviewed matching bundle propagation and atomic replacement failure paths.
+- Coordinator: complete recovered suite passed 60 tests (one opt-in device skip). Log `/tmp/vc-recovered-tests.log`.
+- Native export initial attempt: MuseScore CLI exited 40 before output from an initial synthetic fixture; only startup message logged. This is not export validation. Fixture implementer investigating bounded exports independently without closing the owner's MuseScore.
+
+These approvals do not cover forthcoming setup/display, native app UI, or final integration.
