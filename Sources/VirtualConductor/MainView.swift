@@ -59,7 +59,7 @@ struct MainView: View {
         .onChange(of: museScoreOpen) { _, open in model.filePanelOpen = open }
         .sheet(isPresented: $museScoreOpen) {
             MuseScoreSetupView(link: model.museScore) { files in
-                museScoreOpen = false; model.load(midi: files.midi, wav: files.wav, linked: true)
+                museScoreOpen = false; model.load(midi: files.midi, wav: files.wav, musicXML: files.musicXML, scoreIdentity: model.museScore.sourceURL, linked: true)
             }
         }
         .sheet(isPresented: $model.importOpen) { ImportExportsView(model: model) }
@@ -133,6 +133,21 @@ struct MainView: View {
                 Text("Space · play/pause    ArrowRight · cadenza entrance")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 18) {
+                    Picker("Solo staff", selection: Binding(get: { model.longRestSetup.selectedStaffID }, set: { model.selectLongRestStaff($0) })) {
+                        Text("Choose solo staff").tag(Optional<MusicXMLStaffID>.none)
+                        ForEach(model.longRestSetup.staves, id: \.id) { staff in
+                            Text(staff.displayName).tag(Optional(staff.id))
+                        }
+                    }.frame(maxWidth: 380).disabled(model.longRestSetup.staves.isEmpty || model.locked)
+                    Stepper(value: Binding(get: { model.longRestSetup.threshold }, set: { model.setLongRestThreshold($0) }), in: 1...Int.max) {
+                        Text("Long rest: at least \(model.longRestSetup.threshold) full measures").monospacedDigit()
+                    }.fixedSize().disabled(model.locked)
+                    Spacer()
+                }
+                Text(model.longRestSetup.availability).font(.caption).foregroundStyle(.secondary)
+            }
             Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
             HStack(spacing: 10) {
                 Button("MuseScore rehearsal…") { model.pause(); museScoreOpen = true }.disabled(model.locked)
@@ -177,6 +192,7 @@ private struct ImportExportsView: View {
     @ObservedObject var model: PerformanceModel
     @State private var midi: URL?
     @State private var wav: URL?
+    @State private var musicXML: URL?
     private var validPair: Bool {
         guard let midi, let wav else { return false }
         return ["mid", "midi"].contains(midi.pathExtension.lowercased()) && wav.pathExtension.lowercased() == "wav"
@@ -188,13 +204,16 @@ private struct ImportExportsView: View {
                 .foregroundStyle(.secondary)
             fileRow("MIDI timing", url: midi) { chooseMIDI() }
             fileRow("WAV accompaniment", url: wav) { chooseWAV() }
+            fileRow("MusicXML score (optional, for long-rest cues)", url: musicXML) { chooseMusicXML() }
+            if musicXML != nil { Button("Remove MusicXML") { musicXML = nil } }
+            Text("MusicXML must come from the same score snapshot as the MIDI and WAV. Without it, accompaniment still plays.").font(.caption).foregroundStyle(.secondary)
             Text(model.message).font(.caption).foregroundStyle(model.state == .error ? Color.orange : Color.secondary)
                 .textSelection(.enabled).frame(minHeight: 36, alignment: .topLeading)
             HStack {
                 Button("Cancel") { model.importOpen = false }.keyboardShortcut(.cancelAction).disabled(model.state == .loading)
                 Spacer()
                 if model.state == .loading { ProgressView().controlSize(.small) }
-                Button("Load") { if let midi, let wav { model.load(midi: midi, wav: wav) } }
+                Button("Load") { if let midi, let wav { model.load(midi: midi, wav: wav, musicXML: musicXML, scoreIdentity: musicXML) } }
                     .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
                     .disabled(!validPair || model.state == .loading)
             }
@@ -219,6 +238,12 @@ private struct ImportExportsView: View {
         panel.allowedContentTypes = [UTType(filenameExtension: "mid") ?? .data, UTType(filenameExtension: "midi") ?? .data]
         panel.prompt = "Choose MIDI"
         if panel.runModal() == .OK { midi = panel.url }
+    }
+    private func chooseMusicXML() {
+        let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType(filenameExtension: "musicxml") ?? .xml, .xml]
+        panel.prompt = "Choose matching MusicXML"
+        if panel.runModal() == .OK { musicXML = panel.url }
     }
     private func chooseWAV() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false

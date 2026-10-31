@@ -31,12 +31,15 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
     @Published var passages: [CadenzaPassage] = []
     @Published var fingerprint = ""
     @Published var prepared: PreparedPerformance?
+    @Published private(set) var longRestSetup = LongRestSetup()
+    private var musicXMLURL: URL?
+    private var scoreIdentity: URL?
     let audio = PerformanceAudio()
     let museScore = MuseScoreLink()
     lazy var recording: RecordingModel = {
         let model = RecordingModel(audio: audio)
         model.museScore = museScore
-        model.onKeep = { [weak self] files in self?.load(midi: files.midi, wav: files.wav, preservingTake: true) }
+        model.onKeep = { [weak self] files in self?.load(midi: files.midi, wav: files.wav, musicXML: files.musicXML, scoreIdentity: self?.scoreIdentity, preservingTake: true) }
         return model
     }()
     private var run: UInt64 = 0
@@ -91,15 +94,17 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         } catch { outputMissing = true; message = error.localizedDescription }
     }
     func testOutput() { guard !locked else { return }; do { if !audio.ready { chooseOutput() }; try audio.testTone() } catch { message = error.localizedDescription } }
-    func load(midi: URL, wav: URL, preservingTake: Bool = false, linked: Bool = false) {
+    func load(midi: URL, wav: URL, musicXML: URL? = nil, scoreIdentity: URL? = nil, preservingTake: Bool = false, linked: Bool = false) {
         if !preservingTake && !linked { museScore.disconnect() }
         run &+= 1; let token = run
+        let cueToken = longRestSetup.beginLoading()
         audio.stop(); recording.close(); state = .loading; message = "Reading exports and preparing audio…"
         Task {
             do {
-                let result = try await Task.detached(priority: .userInitiated) { () -> (MIDIFile,AVAudioPCMBuffer,String) in
+                let result = try await Task.detached(priority: .userInitiated) { () -> (MIDIFile,AVAudioPCMBuffer,String,LongRestSetup.Loaded) in
                     let data = try Data(contentsOf: midi)
-                    return (try MIDIFile(data:data),try PreparedPerformance.load(wav), SHA256.hash(data:data).map { String(format:"%02x",$0) }.joined())
+                    let parsed = try MIDIFile(data: data)
+                    return (parsed,try PreparedPerformance.load(wav), SHA256.hash(data:data).map { String(format:"%02x",$0) }.joined(), LongRestSetup.Loaded(musicXML: musicXML, identity: scoreIdentity ?? musicXML, midi: parsed, keptTiming: preservingTake))
                 }.value
                 guard token == run else { return }
                 var saved: [CadenzaPassage] = []; var warning = ""
@@ -108,6 +113,8 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
                 let prep = preparation, values = saved
                 let new = try await Task.detached { try PreparedPerformance(midi:result.0,source:result.1,preparation:prep,passages:values) }.value
                 guard token == run else { return }
+                longRestSetup.finishLoading(result.3, generation: cueToken)
+                self.musicXMLURL = musicXML; self.scoreIdentity = scoreIdentity
                 prepared = new; fingerprint = result.2; passages = saved; midiURL = midi; wavURL = wav
                 if preservingTake { recording.refreshLinkedScore(result.0, fingerprint: result.2); if utilityOpen { recording.open() } }
                 else { recording.setScore(result.0, fingerprint:result.2) }
@@ -116,10 +123,12 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
                 message = "\(result.0.measures) measures · opening ♩ = \(String(format:"%.1f",result.0.openingBPM)). Ready.\(warning)"
                 if new.duration + 0.1 < new.midi.duration { message += " Audio ends before MIDI; check the matching exports." }
                 importOpen = false
-            } catch { guard token == run else { return }; state = .error; message = "Could not load exports: \(error.localizedDescription)" }
+            } catch { guard token == run else { return }; longRestSetup.failLoading(generation: cueToken); state = .error; message = "Could not load exports: \(error.localizedDescription)" }
         }
     }
-    func reload() { if let midiURL, let wavURL { load(midi:midiURL,wav:wavURL) } }
+    func reload() { if let midiURL, let wavURL { load(midi:midiURL,wav:wavURL,musicXML:musicXMLURL,scoreIdentity:scoreIdentity,linked:museScore.connected) } }
+    func selectLongRestStaff(_ id: MusicXMLStaffID?) { longRestSetup.selectStaff(id) }
+    func setLongRestThreshold(_ value: Int) { longRestSetup.setThreshold(value) }
     func reset() {
         run &+= 1; audio.stop(); position = 0; segmentStart = 0; passageIndex = 0
         state = prepared == nil ? .empty : .ready
