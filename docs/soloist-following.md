@@ -102,7 +102,10 @@ implementation is available through **Live following…** in the app.
   score follower for arbitrary jumps, multiphonics, or chords.
 - MusicXML concert pitches include chromatic and octave transposition. The
   existing import constraints still apply: linear 4/4, no pickups, repeats,
-  jumps, grace-note timing, or unsupported playback ornaments. Unsupported
+  jumps, grace notes that add time to the measure, or unsupported playback ornaments.
+  Ordinary grace notes leave the written beat grid intact. Export matching
+  accounts for their MIDI attacks and for repeated pitches in marked single-note
+  or chord tremolos. Unsupported
   scores retain fixed playback; following explains why it cannot start.
 - Explicit waits accept fractional beats but must coincide with a solo note
   attack. An attack recognized just before its boundary queues adjacent audio

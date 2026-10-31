@@ -37,15 +37,25 @@ struct LongRestSetup {
                   midi.endQuarter > score.endQuarter - 4 + tolerance else {
                 throw MusicalError("MusicXML and MIDI have different musical lengths. Prepare matching exports again.")
             }
-            let intervals = score.staves.flatMap(\.soundingIntervals)
-            let notes = midi.tracks.flatMap(\.noteEvents)
-            // MIDI articulation can shorten notes. Compare attacks, not note-off times.
-            // Cross-staff tie continuations without matching attacks are conservatively unavailable.
-            guard notes.allSatisfy({ note in intervals.contains { abs($0.startQuarter - note.startQuarter) <= tolerance } }),
-                  intervals.allSatisfy({ interval in notes.contains {
-                      abs($0.startQuarter - interval.startQuarter) <= tolerance
-                  } }) else {
-                throw MusicalError("MusicXML and MIDI note positions do not establish a matching linear timeline. Prepare matching exports without playback ornaments or repeats.")
+            let written = Set(score.staves.flatMap(\.soundingIntervals).map(\.startQuarter)).sorted()
+            let notes = midi.tracks.flatMap(\.noteEvents).sorted { $0.startQuarter < $1.startQuarter }
+            var writtenIndex = 0, playedIndex = 0
+            // Every written attack still needs an anchor on the MIDI timeline.
+            // Additional rendered attacks must belong to a marked ornament.
+            let writtenMatches = written.allSatisfy { onset in
+                while playedIndex < notes.count && notes[playedIndex].startQuarter < onset - tolerance { playedIndex += 1 }
+                return playedIndex < notes.count && notes[playedIndex].startQuarter <= onset + tolerance
+            }
+            let playedMatches = notes.allSatisfy { note in
+                let onset = note.startQuarter
+                while writtenIndex < written.count && written[writtenIndex] < onset - tolerance { writtenIndex += 1 }
+                if writtenIndex < written.count && written[writtenIndex] <= onset + tolerance { return true }
+                return score.ornamentAttacks.contains {
+                    $0.pitch == note.pitch && onset >= $0.startQuarter - tolerance && onset < $0.endQuarter + tolerance
+                }
+            }
+            guard writtenMatches && playedMatches else {
+                throw MusicalError("MusicXML and MIDI note positions do not establish a matching linear timeline. Check that both exports use the same score and playback order. Some rendered ornaments cannot be mapped.")
             }
         }
     }

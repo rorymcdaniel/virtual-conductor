@@ -60,6 +60,9 @@ public enum MusicXMLReadError: Error, Equatable, LocalizedError, Sendable {
 }
 
 public struct MusicXMLScore: Sendable {
+    /// Additional MIDI attacks MuseScore may render for ornaments, in concert pitch.
+    /// These ranges are for export validation, not entrances on the written beat grid.
+    public let ornamentAttacks: [MIDINote]
     public let staves: [MusicXMLStaff]
     public let measures: [MusicXMLMeasure]
     public var endQuarter: Double { measures.last?.endQuarter ?? 0 }
@@ -86,6 +89,9 @@ public struct MusicXMLScore: Sendable {
             throw MusicXMLReadError.unsupportedCue(.unestablishedPlayback("Duplicate part IDs."))
         }
         var parsedStaves: [MusicXMLStaff] = []
+        var ornaments: [MIDINote] = []
+        // Allow up to an eighth note of displacement around an ordinary grace group.
+        let graceAllowance = 0.5
         var parsedMeasures: [MusicXMLMeasure] = []
         var partIDs: Set<String> = []
         for part in root.children where part.name == "part" {
@@ -102,6 +108,9 @@ public struct MusicXMLScore: Sendable {
             var transposition: [Int: Int] = [:]
             var staffNumbers = [1]
             var activeTies: [MusicXMLTieKey: Int] = [:]
+            var graceTieStarts: [MusicXMLTieKey: Double] = [:]
+            var graceOnsets: [Int: Set<Double>] = [:]
+            var tremoloOnsets: [Int: Set<Double>] = [:]
             let partMeasures = part.children.filter { $0.name == "measure" }
             if !parsedStaves.isEmpty, partMeasures.count != parsedMeasures.count {
                 throw MusicXMLReadError.unsupportedCue(.unestablishedPlayback("Parts have different measure counts."))
@@ -141,6 +150,23 @@ public struct MusicXMLScore: Sendable {
                             }
                         }
                     case "note", "forward", "backup":
+                        if let grace = element.child("grace") {
+                            guard element.child("duration") == nil, grace.attributes["make-time"] == nil else {
+                                throw MusicXMLReadError.unsupportedCue(.unestablishedPlayback("A grace note adds playback time."))
+                            }
+                            // Grace attacks have no independent position on the written beat grid.
+                            let staff = try element.child("staff")?.positiveInteger() ?? 1
+                            let anchor = start + cursor
+                            graceOnsets[staff, default: []].insert(anchor)
+                            let pitch = element.concertPitch(transpose: transposition[staff] ?? transposition[0] ?? 0)
+                            ornaments.append(MIDINote(pitch: pitch, startQuarter: max(0, anchor - graceAllowance), endQuarter: anchor + graceAllowance))
+                            if element.children.contains(where: { $0.name == "tie" && $0.attributes["type"] == "start" }) {
+                                let key = MusicXMLTieKey(staff: staff,
+                                                         voice: element.child("voice")?.text ?? "1", pitch: try element.pitchKey())
+                                graceTieStarts[key] = start + cursor
+                            }
+                            continue
+                        }
                         guard let divisions, let duration = element.child("duration") else {
                             throw MusicXMLReadError.malformed("Missing divisions or duration.")
                         }
@@ -158,14 +184,20 @@ public struct MusicXMLScore: Sendable {
                         }
                         if element.name == "note" {
                             if element.child("rest") == nil, element.child("cue") == nil {
+                                if element.child("notations")?.child("ornaments")?.child("tremolo")?.attributes["type"] == "single" {
+                                    tremoloOnsets[staff, default: []].insert(start + onset)
+                                }
                                 let key = MusicXMLTieKey(staff: staff, voice: element.child("voice")?.text ?? "1", pitch: try element.pitchKey())
                                 let ties = element.children.filter { $0.name == "tie" }.compactMap { $0.attributes["type"] }
                                 let intervalIndex: Int
-                                if ties.contains("stop") {
-                                    let candidates = activeTies.filter { candidate, index in
-                                        candidate.voice == key.voice && candidate.pitch == key.pitch
+                                let fromGrace = graceTieStarts.removeValue(forKey: key) == start + onset
+                                if ties.contains("stop") && !fromGrace {
+                                    let contiguous = activeTies.filter { candidate, index in
+                                        candidate.pitch == key.pitch
                                             && abs((intervals[candidate.staff]?[index].endQuarter ?? -.infinity) - (start + onset)) < 1e-9
                                     }
+                                    let sameVoice = contiguous.filter { $0.key.voice == key.voice }
+                                    let candidates = sameVoice.isEmpty ? contiguous.filter { $0.key.staff == key.staff } : sameVoice
                                     let origin: MusicXMLTieKey
                                     if candidates[key] != nil {
                                         origin = key
@@ -227,6 +259,15 @@ public struct MusicXMLScore: Sendable {
                 let notes = sounding.enumerated().map { index, interval in
                     MIDINote(pitch: pitches[staff]?[index] ?? -1, startQuarter: interval.startQuarter, endQuarter: interval.endQuarter)
                 }.sorted { $0.startQuarter < $1.startQuarter }
+                for note in notes {
+                    if tremoloOnsets[staff]?.contains(note.startQuarter) == true {
+                        // A single tremolo mark applies to every pitch of its chord.
+                        ornaments.append(note)
+                    } else if graceOnsets[staff]?.contains(note.startQuarter) == true {
+                        ornaments.append(MIDINote(pitch: note.pitch, startQuarter: note.startQuarter,
+                                                  endQuarter: min(note.endQuarter, note.startQuarter + graceAllowance)))
+                    }
+                }
                 parsedStaves.append(MusicXMLStaff(id: MusicXMLStaffID(partID: id, staffNumber: staff), displayName: displayName, soundingIntervals: sounding, notes: notes))
             }
         }
@@ -234,6 +275,7 @@ public struct MusicXMLScore: Sendable {
             throw MusicXMLReadError.malformed("Missing parts or measures.")
         }
         staves = parsedStaves
+        ornamentAttacks = ornaments
         measures = parsedMeasures
     }
 }
@@ -267,8 +309,7 @@ private final class MusicXMLNode {
             || (name == "words" && words.range(of: jumpDirective, options: .regularExpression) != nil) {
             throw MusicXMLReadError.unsupportedCue(.repeatsOrJumps)
         }
-        if name == "grace"
-            || (name == "measure" && attributes["non-controlling"] == "yes")
+        if (name == "measure" && attributes["non-controlling"] == "yes")
             || (name == "note" && ["attack", "release"].contains { attributes[$0] != nil && Double(attributes[$0]!) != 0 })
             || (name == "tremolo" && ["start", "stop"].contains(attributes["type"] ?? "")) {
             throw MusicXMLReadError.unsupportedCue(.unestablishedPlayback("Unsupported timing in \(name)."))

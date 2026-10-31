@@ -7,7 +7,7 @@ final class LongRestSetupTests: XCTestCase {
     private func fixture(_ name: String) -> URL {
         Bundle.module.url(forResource: name, withExtension: "musicxml", subdirectory: "Fixtures")!
     }
-    private func midiData(attacks: [Double], end: Double, tempo: Int = 500_000, noteTicks: Int = 1) -> Data {
+    private func midiData(attacks: [Double], end: Double, tempo: Int = 500_000, noteTicks: Int = 1, pitches: [UInt8]? = nil) -> Data {
         func integer(_ value: Int, _ count: Int) -> [UInt8] {
             (0..<count).reversed().map { UInt8((value >> ($0 * 8)) & 255) }
         }
@@ -20,7 +20,7 @@ final class LongRestSetupTests: XCTestCase {
         var track: [UInt8] = [0,255,81,3] + integer(tempo,3)
         var events: [(Int,[UInt8])] = []
         for (index, attack) in attacks.enumerated() {
-            let pitch = UInt8(24 + index % 80), tick = Int((attack * 480).rounded())
+            let pitch = pitches?[index] ?? UInt8(24 + index % 80), tick = Int((attack * 480).rounded())
             events.append((tick,[144,pitch,80])); events.append((tick + noteTicks,[128,pitch,0]))
         }
         var tick = 0
@@ -34,6 +34,54 @@ final class LongRestSetupTests: XCTestCase {
         let url = fixture(name), score = try MusicXMLScore(data: Data(contentsOf: url))
         let midi = try MIDIFile(data: midiData(attacks: score.staves.flatMap(\.soundingIntervals).map(\.startQuarter), end: score.endQuarter))
         return LongRestSetup.Loaded(musicXML: url, identity: identity, midi: midi, keptTiming: kept)
+    }
+    func testOrdinaryGraceNoteDoesNotHideSoloStaff() throws {
+        let original = try String(contentsOf: fixture("long-rest-eight-measures"), encoding: .utf8)
+        let grace = "<note><grace slash=\"yes\"/><pitch><step>B</step><octave>4</octave></pitch><type>eighth</type></note>"
+        let xml = original.replacingOccurrences(of: "<note><pitch><step>C", with: grace + "<note><pitch><step>C")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data(xml.utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let midi = try MIDIFile(data: midiData(attacks: [34.5], end: 36))
+        let result = LongRestSetup.Loaded(musicXML: url, identity: url, midi: midi)
+        let score = try XCTUnwrap(result.score, result.unavailable ?? "")
+        XCTAssertEqual(score.staves.first?.notes.map(\.startQuarter), [34.5])
+    }
+    func testGraceAndTremoloRenderingsKeepTheWrittenTimeline() throws {
+        let xml = """
+        <score-partwise><part id="Solo"><measure number="1">
+        <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+        <note><rest/><duration>1</duration></note>
+        <note><grace/><pitch><step>C</step><octave>4</octave></pitch><tie type="start"/></note>
+        <note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><tie type="stop"/></note>
+        <note><pitch><step>F</step><octave>4</octave></pitch><duration>2</duration>
+        <notations><ornaments><tremolo type="single">3</tremolo></ornaments></notations></note>
+        <note><chord/><pitch><step>A</step><octave>4</octave></pitch><duration>2</duration></note>
+        </measure></part></score-partwise>
+        """
+        let score = try MusicXMLScore(data: Data(xml.utf8))
+        XCTAssertEqual(score.staves[0].notes.map(\.startQuarter), [1, 2, 2])
+        let attacks = [0.875, 1, 1.125, 2, 2.25, 2.5]
+        func validate(_ pitches: [UInt8]) throws {
+            let midi = try MIDIFile(data: midiData(attacks: attacks, end: 4, pitches: pitches))
+            try LongRestSetup.Loaded.validateMapping(score: score, midi: midi)
+        }
+        XCTAssertNoThrow(try validate([60, 60, 60, 65, 65, 69]))
+        XCTAssertThrowsError(try validate([61, 60, 60, 65, 65, 69]))
+        XCTAssertThrowsError(try validate([60, 60, 60, 65, 66, 69]))
+    }
+
+    func testTieContinuesWhenMuseScoreMovesThePitchToAnotherVoice() throws {
+        let xml = """
+        <score-partwise><part id="P"><measure number="1">
+        <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+        <note><pitch><step>B</step><octave>2</octave></pitch><duration>4</duration><tie type="start"/><voice>2</voice></note>
+        </measure><measure number="2">
+        <note><pitch><step>B</step><octave>2</octave></pitch><duration>4</duration><tie type="stop"/><voice>1</voice></note>
+        </measure></part></score-partwise>
+        """
+        let score = try MusicXMLScore(data: Data(xml.utf8))
+        XCTAssertEqual(score.staves[0].notes, [MIDINote(pitch: 47, startQuarter: 0, endQuarter: 8)])
     }
     func testStaffAndThresholdRebuildOnlySelectedSchedule() throws {
         var setup = LongRestSetup()

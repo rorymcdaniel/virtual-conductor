@@ -19,6 +19,10 @@ struct FollowingView: View {
             Picker("Solo staff", selection: $values.solo) {
                 Text("Choose solo staff").tag(Optional<MusicXMLStaffID>.none)
                 ForEach(model.longRestSetup.staves, id: \.id) { staff in Text(staff.displayName).tag(Optional(staff.id)) }
+            }.disabled(model.longRestSetup.staves.isEmpty)
+            if model.longRestSetup.staves.isEmpty {
+                Text(model.longRestSetup.availability.replacingOccurrences(of: "Long-rest cues", with: "Live following"))
+                    .font(.callout).foregroundStyle(.orange)
             }
             Picker("Microphone", selection: $inputID) {
                 if !model.devices.contains(where: { $0.input && $0.id == inputID }) {
