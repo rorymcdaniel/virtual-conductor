@@ -99,9 +99,13 @@ struct FollowingConfiguration: Codable {
         let points = plan.waits + plan.freePassages.flatMap { [$0.start, $0.end] } + plan.cadenzas.flatMap { [$0.startQuarter, $0.returnQuarter] }
         let limits = Array(Set([0, position, prepared.end] + points.map { prep + midi.seconds(atQuarter: $0) }))
             .filter { $0 >= 0 && $0 <= prepared.end }.sorted()
+        let releases = Dictionary(uniqueKeysWithValues: plan.freePassages.compactMap { gap -> (Double, Double)? in
+            guard !plan.waits.contains(gap.start), !plan.cadenzas.contains(where: { $0.startQuarter == gap.start }) else { return nil }
+            return (prep + midi.seconds(atQuarter: gap.start), prep + midi.seconds(atQuarter: gap.end))
+        })
         let segments = try await Task.detached(priority: .userInitiated) {
             try zip(limits, limits.dropFirst()).map { start, end in
-                try PreparedPerformance.makeSegment(source: prepared.source, timing: prepared.timing, position: start, end: end)
+                try PreparedPerformance.makeSegment(source: prepared.source, timing: prepared.timing, position: start, end: end, ringOutUntil: releases[end])
             }
         }.value
         guard token == generation else { throw CancellationError() }
@@ -126,7 +130,7 @@ struct FollowingConfiguration: Codable {
     private func seconds(_ quarter: Double) -> Double { prepared!.timing.prepSeconds + prepared!.midi.seconds(atQuarter: quarter) }
     private func quarter(_ seconds: Double) -> Double { prepared!.midi.quarter(atSeconds: seconds - prepared!.timing.prepSeconds) }
 
-    private func enter(at location: Double, initial: Bool = false) throws {
+    private func enter(at location: Double, initial: Bool = false, fromAccompaniment: Bool = false) throws {
         guard let plan, let prepared, let audio else { return }
         position = location; entered = clock(); queuedEnd = nil
         if location >= prepared.end - 1e-7 {
@@ -144,8 +148,12 @@ struct FollowingConfiguration: Codable {
             detail = "Play the expected entrance · Right Arrow to continue"; return
         }
         if let free = plan.freePassages.first(where: { q >= $0.start - 1e-7 && q < $0.end - 1e-7 }) {
-            audio.stop(); audio.setRate(1); tempo.reset(); phase = .free(free); status = .waiting
-            tracker.reset(notes: plan.notes, quarter: q)
+            if !fromAccompaniment { audio.stop() }
+            tempo.reset(); phase = .free(free)
+            let carriesPhrase = fromAccompaniment && entered - tracker.lastMatch < 0.4 &&
+                tracker.index.map { plan.notes[$0].endQuarter >= q - 1e-7 && plan.notes[$0].startQuarter <= q + 1e-7 } == true
+            if !carriesPhrase { tracker.reset(notes: plan.notes, quarter: q) }
+            status = carriesPhrase ? .following : .waiting
             detail = "Solo passage · play freely · Right Arrow cues the return"; return
         }
         guard let buffer = buffers[location] else { throw MusicalError("Following playback boundary is unavailable. Reset and start again.") }
@@ -176,7 +184,11 @@ struct FollowingConfiguration: Codable {
         audio?.setRate(1); tempo.reset()
         // A configured wait at the return still requires its entrance or this explicit cue.
         approvedWaits.insert(range.end)
-        tracker.reset(notes: plan!.notes, quarter: range.end)
+        if let index = tracker.index, abs(plan!.notes[index].startQuarter - range.end) < 1e-7 {
+            tracker.beginAccompaniedPhrase(scoreTime: prepared!.midi.seconds(atQuarter: range.end))
+        } else {
+            tracker.reset(notes: plan!.notes, quarter: range.end)
+        }
         try enter(at: seconds(range.end))
     }
 
@@ -192,7 +204,7 @@ struct FollowingConfiguration: Codable {
                 if position >= audioEnd - 1e-7 {
                     if let next = queuedEnd {
                         audioEnd = next; queuedEnd = nil
-                    } else { try enter(at: audioEnd) }
+                    } else { try enter(at: audioEnd, fromAccompaniment: true) }
                     return
                 }
                 let q = quarter(position)
@@ -200,7 +212,7 @@ struct FollowingConfiguration: Codable {
                 let note = tracker.index.map { plan.notes[$0] }
                 let expectingSound = plan.notes.contains { $0.startQuarter <= q && q < $0.endQuarter }
                 let age = now - tracker.lastMatch
-                let phaseError = note.map { seconds($0.startQuarter) + (now - tracker.lastAttack) * tracker.rate - position } ?? 0
+                let phaseError = note.map { min(seconds($0.endQuarter), seconds($0.startQuarter) + (now - tracker.lastAttack) * tracker.rate) - position } ?? 0
                 let rate = tempo.update(delta: delta, tolerance: tolerance / 100, trackedRate: tracker.rate,
                                         phaseError: phaseError, age: expectingSound ? age : 10)
                 audio.setRate(rate)
@@ -260,7 +272,7 @@ struct FollowingConfiguration: Codable {
             rearticulated = articulation.observe(rms: rms, time: frameTime) || rearticulated
             articulationWindow.removeFirst(hop)
         }
-        let size = Int(capture.sampleRate * 0.075)
+        let size = max(512 * max(1, Int(capture.sampleRate / 12000)), Int(capture.sampleRate * 0.045))
         window.append(contentsOf: incoming)
         if window.count > size { window.removeFirst(window.count - size) }
         guard window.count >= size else { return }
@@ -274,7 +286,8 @@ struct FollowingConfiguration: Codable {
             guard token == generation, active else { return }
             analyzing = false
             guard clock() - now < 0.25 else { status = .lost; return }
-            observe(pitch: pitch, time: now, rearticulated: attack)
+            let observedAt = silent ? now : now - Double(samples.count) / (2 * rate)
+            observe(pitch: pitch, time: observedAt, rearticulated: attack)
         }
     }
 
@@ -282,9 +295,14 @@ struct FollowingConfiguration: Codable {
         guard active, let plan, let prepared else { return }
         lastPitch = pitch; lastObservation = time
         if case .cadenza = phase { return }
-        let free: Bool
-        switch phase { case .audio: free = false; default: free = true }
-        let matched = tracker.observe(pitch: pitch, time: time, notes: plan.notes, expectedQuarter: quarter(position), free: free, midi: prepared.midi, rearticulated: rearticulated)
+        let free: Bool, lastQuarter: Double
+        switch phase {
+        case .free(let range): free = true; lastQuarter = range.end
+        case .wait(let entrance): free = true; lastQuarter = entrance
+        default: free = false; lastQuarter = .infinity
+        }
+        let matched = tracker.observe(pitch: pitch, time: time, notes: plan.notes, expectedQuarter: quarter(position),
+                                      free: free, midi: prepared.midi, rearticulated: rearticulated, throughQuarter: lastQuarter)
         guard let matched else { return }
         let q = plan.notes[matched].startQuarter
         do {

@@ -4,7 +4,7 @@ import ConductorCore
 @testable import VirtualConductor
 
 enum FollowingFixture {
-    static func score(silentMeasures: Int = 2, transpose: Int = 0, restAcrossReturn: Bool = false, sustainAcrossReturn: Bool = false) throws -> MusicXMLScore {
+    static func score(silentMeasures: Int = 2, silentFrom: Int = 0, transpose: Int = 0, restAcrossReturn: Bool = false, sustainAcrossReturn: Bool = false) throws -> MusicXMLScore {
         let names = ["C", "D", "E", "F"]
         let attributes = "<attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time><transpose><chromatic>\(transpose)</chromatic></transpose></attributes>"
         let solo = (0..<4).map { m in
@@ -18,7 +18,7 @@ enum FollowingFixture {
         }.joined()
         let orchestra = (0..<4).map { m in
             "<measure number=\"\(m+1)\">" + (m == 0 ? attributes : "") + "<note>" +
-            (m < silentMeasures ? "<rest/>" : "<pitch><step>C</step><octave>3</octave></pitch>") + "<duration>4</duration></note></measure>"
+            ((silentFrom..<(silentFrom + silentMeasures)).contains(m) ? "<rest/>" : "<pitch><step>C</step><octave>3</octave></pitch>") + "<duration>4</duration></note></measure>"
         }.joined()
         return try MusicXMLScore(data: Data("<score-partwise><part-list><score-part id=\"S\"><part-name>Solo</part-name></score-part><score-part id=\"O\"><part-name>Orchestra</part-name></score-part></part-list><part id=\"S\">\(solo)</part><part id=\"O\">\(orchestra)</part></score-partwise>".utf8))
     }
@@ -39,6 +39,41 @@ enum FollowingFixture {
 }
 
 final class SoloFollowingTests: XCTestCase {
+    func testHeldPitchDoesNotJumpAcrossInterveningNotesOnAnAmplitudeAccent() throws {
+        let notes = [60, 62, 64, 60].enumerated().map { MIDINote(pitch: $1, startQuarter: Double($0), endQuarter: Double($0 + 1)) }
+        let midi = try FollowingFixture.midi()
+        var tracker = SoloTracker()
+        for t in [0.0, 0.03] { _ = tracker.observe(pitch: 60, time: t, notes: notes, expectedQuarter: 0, free: false, midi: midi) }
+        _ = tracker.observe(pitch: 60, time: 0.2, notes: notes, expectedQuarter: 0.4, free: false, midi: midi, rearticulated: true)
+        XCTAssertEqual(tracker.index, 0)
+    }
+
+    func testWrongFreePassagePitchCannotJumpToADistantOrchestralReturn() throws {
+        let notes = (0..<7).map { MIDINote(pitch: 60+$0, startQuarter: Double($0), endQuarter: Double($0+1)) }
+        let midi = try FollowingFixture.midi()
+        var tracker = SoloTracker()
+        for t in [0.0, 0.03] {
+            _ = tracker.observe(pitch: 65, time: t, notes: notes, expectedQuarter: 0, free: true, midi: midi, throughQuarter: 5)
+        }
+        XCTAssertNil(tracker.index)
+        tracker.reset(notes: notes, quarter: 4)
+        for t in [3.0, 3.03] {
+            _ = tracker.observe(pitch: 66, time: t, notes: notes, expectedQuarter: 4, free: true, midi: midi, throughQuarter: 5)
+        }
+        XCTAssertNil(tracker.index)
+    }
+
+    func testTripletTempoUsesThePhraseDespiteFrameTimingJitter() throws {
+        let midi = try FollowingFixture.midi(), pace = 0.94
+        let notes = (0..<8).map { MIDINote(pitch: 60 + $0, startQuarter: Double($0)/3, endQuarter: Double($0+1)/3) }
+        var tracker = SoloTracker()
+        for (i, note) in notes.enumerated() {
+            let onset = midi.seconds(atQuarter: note.startQuarter) / pace + (i.isMultiple(of: 2) ? 0 : 0.025)
+            for t in [onset, onset + 0.02] { _ = tracker.observe(pitch: note.pitch, time: t, notes: notes, expectedQuarter: note.startQuarter, free: false, midi: midi) }
+        }
+        XCTAssertEqual(tracker.index, 7)
+        XCTAssertEqual(tracker.rate, pace, accuracy: 0.04)
+    }
     func testConcertPitchAndAutomaticSilence() throws {
         let score = try FollowingFixture.score(transpose: -7)
         let plan = try FollowingPlan(score: score, solo: FollowingFixture.solo, waits: [WaitPoint(measure: 1, beat: 2)], cadenzas: [])
@@ -139,6 +174,26 @@ final class SoloFollowingTests: XCTestCase {
 }
 
 @MainActor final class LiveFollowingTests: XCTestCase {
+    func testRenderedReleaseContinuesWhenAutomaticFreeFollowingBegins() async throws {
+        let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
+        // The written accompaniment ends at 2 seconds, but its WAV still rings.
+        let start = 16000, frames = 2000
+        for i in 0..<frames { prepared.source.floatChannelData![0][start+i] = 0.1 * Float(frames-i)/Float(frames) }
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentFrom: 1), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        let follower = LiveFollowing(capture: input, permission: { true })
+        try await follower.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        let segment = try XCTUnwrap(audio.played.first)
+        let boundary = Int(segment.clicks.frameLength)
+        XCTAssertGreaterThanOrEqual(Int(segment.music.frameLength), boundary + frames)
+        if Int(segment.music.frameLength) > boundary + frames/2 {
+            XCTAssertEqual(segment.music.floatChannelData![0][boundary + frames/2], 0.05, accuracy: 0.0001)
+        }
+        let stops = audio.stops
+        audio.sourcePosition = segment.end
+        follower.tick()
+        XCTAssertEqual(audio.stops, stops)
+        XCTAssertEqual(audio.played.count, 1)
+    }
     func testReturnInsideHeldNoteRequestsPedalInsteadOfGuessingRubato() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0

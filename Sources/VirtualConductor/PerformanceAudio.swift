@@ -34,17 +34,32 @@ final class PreparedPerformance {
         guard buffer.floatChannelData != nil else { throw NativeError.message("The WAV could not be decoded as PCM.") }
         return buffer
     }
-    static func makeSegment(source: AVAudioPCMBuffer, timing: PerformanceTiming, position: Double, end: Double) throws -> AudioSegment {
+    static func makeSegment(source: AVAudioPCMBuffer, timing: PerformanceTiming, position: Double, end: Double, ringOutUntil: Double? = nil) throws -> AudioSegment {
         let rate = source.format.sampleRate
         // A single rounding function is used for boundaries and source offsets.
         let first = Int64((position * rate).rounded()), last = Int64((end * rate).rounded())
         let count = max(1, last - first)
-        guard count < Int64(UInt32.max), let music = AVAudioPCMBuffer(pcmFormat: source.format, frameCapacity: UInt32(count)), let clickFormat = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1), let clicks = AVAudioPCMBuffer(pcmFormat: clickFormat, frameCapacity: UInt32(count)) else { throw NativeError.message("Could not prepare audio buffers.") }
-        music.frameLength = UInt32(count); clicks.frameLength = UInt32(count)
         let prepFrame = Int64((timing.prepSeconds * rate).rounded())
+        var musicEnd = last
+        if let limit = ringOutUntil, last >= prepFrame {
+            // Continue the rendered release into a notated rest. Stop looking at the
+            // first 50 ms of quiet, or the next orchestral entrance, whichever is first.
+            let limitFrame = min(Int64((limit * rate).rounded()), prepFrame + Int64(source.frameLength))
+            var quietFrames = 0
+            while musicEnd < limitFrame {
+                let offset = Int(musicEnd - prepFrame)
+                let audible = (0..<Int(source.format.channelCount)).contains { abs(source.floatChannelData![$0][offset]) > 0.0001 }
+                quietFrames = audible ? 0 : quietFrames + 1
+                musicEnd += 1
+                if quietFrames >= Int(rate * 0.05) { break }
+            }
+        }
+        let musicCount = max(count, musicEnd - first)
+        guard musicCount < Int64(UInt32.max), let music = AVAudioPCMBuffer(pcmFormat: source.format, frameCapacity: UInt32(musicCount)), let clickFormat = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1), let clicks = AVAudioPCMBuffer(pcmFormat: clickFormat, frameCapacity: UInt32(count)) else { throw NativeError.message("Could not prepare audio buffers.") }
+        music.frameLength = UInt32(musicCount); clicks.frameLength = UInt32(count)
         for c in 0..<Int(source.format.channelCount) {
-            let dest = music.floatChannelData![c]; dest.initialize(repeating: 0, count: Int(count))
-            let from = max(first, prepFrame), to = min(last, prepFrame + Int64(source.frameLength))
+            let dest = music.floatChannelData![c]; dest.initialize(repeating: 0, count: Int(musicCount))
+            let from = max(first, prepFrame), to = min(musicEnd, prepFrame + Int64(source.frameLength))
             if to > from { dest.advanced(by: Int(from-first)).update(from: source.floatChannelData![c].advanced(by: Int(from-prepFrame)), count: Int(to-from)) }
         }
         let dest = clicks.floatChannelData![0]; dest.initialize(repeating: 0, count: Int(count))

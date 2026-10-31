@@ -42,6 +42,10 @@ implementation is available through **Live following…** in the app.
 - In these passages, free following tracks the performer's position through
   the written solo part, allowing extreme rubato and pauses beyond the global
   tempo tolerance.
+- At the start of an automatically detected solo passage, the clicks end on
+  the written boundary. The preceding orchestral sound can ring out in the WAV
+  while the conductor follows the soloist. The release ends when the recording
+  goes quiet or the next orchestral entrance is reached.
 - After a freely followed passage, the orchestra returns at the planned tempo,
   then resumes following within the global tolerance. Extreme rubato at the
   end of the solo passage does not determine the orchestral return tempo.

@@ -80,21 +80,29 @@ public struct SoloTracker: Sendable {
     private var candidatePitch: Int?
     private var candidateCount = 0
     private var silentFrames = 0
-    private var lastAttackQuarter: Double?
-    private var lastAttackTime: Double?
+    private var anchors: [(scoreTime: Double, hostTime: Double)] = []
+    private var candidateSince = 0.0
     private var searchStart = 0
 
     public init() {}
     public mutating func reset(notes: [MIDINote], quarter: Double, preservingSound: Bool = false) {
-        let sounding = previousPitch, candidate = candidatePitch, count = candidateCount
+        let sounding = previousPitch, candidate = candidatePitch, count = candidateCount, since = candidateSince
         self = SoloTracker()
-        if preservingSound { previousPitch = sounding; candidatePitch = candidate; candidateCount = count }
+        if preservingSound { previousPitch = sounding; candidatePitch = candidate; candidateCount = count; candidateSince = since }
         searchStart = notes.firstIndex { $0.endQuarter > quarter + 1e-7 } ?? notes.count
+    }
+
+    public mutating func beginAccompaniedPhrase(scoreTime: Double) {
+        // The return starts at planned tempo. Keep the recognized attack so a
+        // sustained return note is not mistaken for a second entrance.
+        rate = 1
+        anchors = [(scoreTime, lastAttack)]
     }
 
     @discardableResult
     public mutating func observe(pitch: Int?, time: Double, notes: [MIDINote], expectedQuarter: Double,
-                                 free: Bool, midi: MIDIFile, rearticulated: Bool = false) -> Int? {
+                                 free: Bool, midi: MIDIFile, rearticulated: Bool = false,
+                                 throughQuarter: Double = .infinity) -> Int? {
         guard let pitch else {
             silentFrames += 1
             if silentFrames >= 2 { previousPitch = nil; if releasedAt == nil { releasedAt = time } }
@@ -102,31 +110,43 @@ public struct SoloTracker: Sendable {
             return nil
         }
         silentFrames = 0
-        if candidatePitch == pitch { candidateCount += 1 } else { candidatePitch = pitch; candidateCount = 1 }
+        if candidatePitch == pitch { candidateCount += 1 } else { candidatePitch = pitch; candidateCount = 1; candidateSince = time }
         guard candidateCount >= 2 else { return nil }
-        let attack = previousPitch != pitch || rearticulated
+        let repeatedAccent = previousPitch == pitch && rearticulated
+        let attack = previousPitch != pitch || repeatedAccent
         previousPitch = pitch
+        // A change in loudness on a sustained pitch cannot skip intervening pitches.
+        if repeatedAccent, let index, notes[index].pitch == pitch,
+           index + 1 == notes.count || notes[index + 1].pitch != pitch {
+            lastMatch = time; releasedAt = nil
+            return nil
+        }
         if !attack, let index, notes[index].pitch == pitch {
             lastMatch = time; releasedAt = nil
             return nil
         }
         guard attack else { return nil }
         let lower = max(searchStart, (index ?? (searchStart - 1)) + 1)
-        var candidates = Array(lower..<min(notes.count, lower + 8))
+        var candidates = Array(lower..<min(notes.count, lower + (free ? 3 : 8)))
         if !free {
             // Permit reacquisition near the sounding accompaniment after extended loss.
             candidates += notes.indices.filter { abs(notes[$0].startQuarter - expectedQuarter) < 4 && $0 >= lower }
         }
-        guard let match = candidates.filter({ notes[$0].pitch == pitch }).min(by: {
+        if repeatedAccent, let index, notes[index].pitch == pitch { candidates = lower < notes.count ? [lower] : [] }
+        guard let match = candidates.filter({ notes[$0].pitch == pitch && notes[$0].startQuarter <= throughQuarter + 1e-7 }).min(by: {
             if free { return $0 < $1 }
             return abs(notes[$0].startQuarter - expectedQuarter) < abs(notes[$1].startQuarter - expectedQuarter)
         }) else { return nil }
-        if let quarter = lastAttackQuarter, let host = lastAttackTime, time - host > 0.08 {
-            let ratio = (midi.seconds(atQuarter: notes[match].startQuarter) - midi.seconds(atQuarter: quarter)) / (time - host)
-            rate = min(4, max(0.1, ratio))
+        let onset = repeatedAccent ? time : candidateSince
+        let scoreTime = midi.seconds(atQuarter: notes[match].startQuarter)
+        // Estimate pace over a short phrase. A frame of onset jitter on a single
+        // triplet should not drive the accompaniment all the way to its tempo limit.
+        while anchors.count > 1 && onset - anchors[0].hostTime > 1.2 { anchors.removeFirst() }
+        if let anchor = anchors.first, onset - anchor.hostTime > 0.08 {
+            rate = min(4, max(0.1, (scoreTime - anchor.scoreTime) / (onset - anchor.hostTime)))
         }
-        index = match; lastMatch = time; lastAttack = time; releasedAt = nil
-        lastAttackQuarter = notes[match].startQuarter; lastAttackTime = time
+        anchors.append((scoreTime, onset))
+        index = match; lastMatch = time; lastAttack = onset; releasedAt = nil
         return match
     }
 }
