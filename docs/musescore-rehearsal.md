@@ -50,7 +50,7 @@ Prepare a rehearsal, then choose **Solo staff** and a positive **Long rest** thr
 
 Manual **Load new exports…** also accepts an optional matching uncompressed MusicXML file. All three files must come from the same score snapshot. MIDI/WAV alone continue to play, with a message explaining why long-rest cues are unavailable. Score replacement clears staff selection when its association cannot be established. Keeping an interpretation refreshes cues from the matching preview exports and current tempo map.
 
-Cues support a linear, constant-4/4 score without pickups. Unsupported repeats, jumps, meter changes or unestablished MusicXML-to-MIDI mapping disable cues with a reason. The mapping check is conservative; it may reject playback ornaments or other exports whose note positions differ. It does not expand repeats or follow the soloist.
+Cues support a linear, constant-4/4 score without pickups. Unsupported repeats, jumps, meter changes or unestablished MusicXML-to-MIDI mapping disable cues with a reason. The mapping check is conservative; it may reject playback ornaments or other exports whose note positions differ. Cross-staff tie continuations without a matching MIDI attack are conservatively unavailable. It does not expand repeats or follow the soloist.
 
 A qualifying rest displays a counter from its first full resting measure, even before the threshold has elapsed in playback. Eight full resting measures show **1/8** through **8/8**. If the next entrance is measure 9 beat 3.5, the count stays **8/8** through the partial rest, the entrance cue begins at beat 3, and the count ends at the entrance. There is no ninth full resting measure, earlier preparatory cue or invented entrance after a trailing rest.
 

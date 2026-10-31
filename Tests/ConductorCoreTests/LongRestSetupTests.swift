@@ -7,7 +7,7 @@ final class LongRestSetupTests: XCTestCase {
     private func fixture(_ name: String) -> URL {
         Bundle.module.url(forResource: name, withExtension: "musicxml", subdirectory: "Fixtures")!
     }
-    private func midiData(attacks: [Double], end: Double, tempo: Int = 500_000) -> Data {
+    private func midiData(attacks: [Double], end: Double, tempo: Int = 500_000, noteTicks: Int = 1) -> Data {
         func integer(_ value: Int, _ count: Int) -> [UInt8] {
             (0..<count).reversed().map { UInt8((value >> ($0 * 8)) & 255) }
         }
@@ -21,7 +21,7 @@ final class LongRestSetupTests: XCTestCase {
         var events: [(Int,[UInt8])] = []
         for (index, attack) in attacks.enumerated() {
             let pitch = UInt8(24 + index % 80), tick = Int((attack * 480).rounded())
-            events.append((tick,[144,pitch,80])); events.append((tick + 1,[128,pitch,0]))
+            events.append((tick,[144,pitch,80])); events.append((tick + noteTicks,[128,pitch,0]))
         }
         var tick = 0
         for event in events.sorted(by: { $0.0 < $1.0 }) {
@@ -90,6 +90,18 @@ final class LongRestSetupTests: XCTestCase {
         XCTAssertNoThrow(try LongRestSetup.Loaded.validateMapping(score: score, midi: MIDIFile(data: midiData(attacks: [34.5], end: 35.95))))
         XCTAssertThrowsError(try LongRestSetup.Loaded.validateMapping(score: score, midi: MIDIFile(data: midiData(attacks: [30.5], end: 32))))
     }
+    func testSustainingAccompanimentCannotSubstituteForMissingSoloAttack() throws {
+        let original = try String(contentsOf: fixture("long-rest-eight-measures"), encoding: .utf8)
+        let xml = original.replacingOccurrences(of: "<duration>5</duration></note>", with:
+            "<duration>4</duration></note><note><pitch><step>G</step><octave>3</octave></pitch><duration>2</duration></note><backup><duration>1</duration></backup>")
+        let score = try MusicXMLScore(data: Data(xml.utf8))
+        // The accompaniment begins at 34 and spans the solo's missing 34.5 attack.
+        let missing = try MIDIFile(data: midiData(attacks: [34], end: 36, noteTicks: 480))
+        XCTAssertThrowsError(try LongRestSetup.Loaded.validateMapping(score: score, midi: missing))
+        let matching = try MIDIFile(data: midiData(attacks: [34, 34.5], end: 36, noteTicks: 480))
+        XCTAssertNoThrow(try LongRestSetup.Loaded.validateMapping(score: score, midi: matching))
+    }
+
     func testChangedScoreAtSamePathClearsSelectionButKeptTempoRefreshPreservesIt() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

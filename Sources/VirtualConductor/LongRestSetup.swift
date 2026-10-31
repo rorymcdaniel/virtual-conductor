@@ -40,11 +40,10 @@ struct LongRestSetup {
             let intervals = score.staves.flatMap(\.soundingIntervals)
             let notes = midi.tracks.flatMap(\.noteEvents)
             // MIDI articulation can shorten notes. Compare attacks, not note-off times.
-            // A cross-staff tie may split a MusicXML interval without a new MIDI attack.
+            // Cross-staff tie continuations without matching attacks are conservatively unavailable.
             guard notes.allSatisfy({ note in intervals.contains { abs($0.startQuarter - note.startQuarter) <= tolerance } }),
                   intervals.allSatisfy({ interval in notes.contains {
-                      abs($0.startQuarter - interval.startQuarter) <= tolerance ||
-                      ($0.startQuarter < interval.startQuarter && $0.endQuarter > interval.startQuarter)
+                      abs($0.startQuarter - interval.startQuarter) <= tolerance
                   } }) else {
                 throw MusicalError("MusicXML and MIDI note positions do not establish a matching linear timeline. Prepare matching exports without playback ornaments or repeats.")
             }
