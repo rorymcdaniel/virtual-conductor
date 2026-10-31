@@ -235,6 +235,9 @@ private struct ImportExportsView: View {
     }
     private func chooseMIDI() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        // Installed music apps can register conflicting MIDI content types.
+        // The import form validates the extension and the reader validates the bytes.
+        panel.allowsOtherFileTypes = true
         panel.allowedContentTypes = [UTType(filenameExtension: "mid") ?? .data, UTType(filenameExtension: "midi") ?? .data]
         panel.prompt = "Choose MIDI"
         if panel.runModal() == .OK { midi = panel.url }
