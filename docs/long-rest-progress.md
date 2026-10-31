@@ -2,7 +2,7 @@
 
 ## Authority and delivery
 
-Source: `/Users/rory/.codex/handoffs/virtual-conductor/` HANDOFF.md, document.mdx, tasks.json and decisions.json (read 2026-10-30). The answered decision requires a counter throughout qualifying rests. Cancelled decisions remain closed. Constant 4/4, single selected staff, containing-beat cue; no following, pickups or repeat expansion. Owner performs final UAT. Draft PR delivery only; no merges, auto-merge or ready-for-review changes. No Chopin execution APIs.
+Source: `/Users/rory/.codex/handoffs/virtual-conductor/` HANDOFF.md, document.mdx, tasks.json and decisions.json (read 2026-10-30). The answered decision requires a counter throughout qualifying rests. Cancelled decisions remain closed. Constant 4/4, single selected staff, containing-beat cue; no following, pickups or repeat expansion. Owner performs final UAT. The original handoff required draft-only delivery. On 2026-10-31 the owner superseded that boundary: all PRs should be merged; PRs record review history and do not await owner approval. No Chopin execution APIs.
 
 ## Recovery
 
@@ -81,3 +81,7 @@ Delivery preserves draft PR #2 and #3 and all recovered implementation ancestry.
 Draft continuation PR: https://github.com/rorymcdaniel/virtual-conductor/pull/4, base `chopin/implement-b8daddcd` (retained integration). Existing drafts https://github.com/rorymcdaniel/virtual-conductor/pull/2 and https://github.com/rorymcdaniel/virtual-conductor/pull/3 remain open and reused. Branch `codex/long-rest-cues` pushed. Delivery commits after source `10230a1` contain documentation only.
 
 Additional native checks: threshold9 changed availability to no qualifying rests; restored8; switching to Accompaniment reported no qualifying rests; restored Solo; Reread exports preserved selection and readiness. App left loaded for owner trial. Relative links in README and all new/changed rehearsal documents validated; diff check passed. No repository-hosted CI jobs were present in PR check rollups; local verification is recorded above.
+
+## Owner delivery clarification — 2026-10-31
+
+The owner instructed: “All PRs should be merged. They are a way to review history, not for me to approve.” This supersedes the historical draft-only restrictions above and in the exported handoff. Technical review remains agent-owned; instrument-playing UAT remains owner-owned. Merge export #2 and reader #3 first, retarget continuation #4 to main, then merge it while preserving original implementation commits. Required checks and protections still apply. All three candidates had independent technical approval; no additional source changes are introduced for delivery.
