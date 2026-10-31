@@ -21,14 +21,14 @@ Inspected all three retained run checkouts (b8daddcd, 133185a4, 72b0adc7), all l
 Integration branch `codex/long-rest-cues`, isolated checkout `/Users/rory/Code/virtual-conductor-long-rest`.
 
 - Export/reader/schedule: recovered; independent musical and technical reviews passed (`ready: true`).
-- Setup: implemented at `b569a16bd5cd49c6d841456d1dd087400a6191a2`; independent reviews underway.
-- Display: vc-implementer owns ConductorSurface.swift, new display-state logic and tests; implementing against committed setup.
-- Final musical/code reviews and then independent integration verification: pending.
+- Setup: implemented at `b569a16bd5cd49c6d841456d1dd087400a6191a2`, repaired at `e88f9c0`, independently approved.
+- Display: implemented at `c4f4035`, independently approved and exercised in the native app.
+- Final musical/code reviews followed by independent integration verification: all `ready: true` on source `10230a18c6bf6bfe7338a071bd77fe2ede018fe1`.
 - Full recovered `swift test`: 60 tests, 1 existing opt-in device skip, zero failures (2026-10-30).
 
 ## Verification and limitations
 
-No new technical acceptance yet. Native app and MuseScore validation, final build, draft delivery, and owner trial instructions remain pending.
+Technical reviews, final checks, actual MuseScore export and native playback completed. Native file-dialog confirmation remains unverified under automation; verified direct-file loading is available. Owner instrument-playing readability and physical audio-device UAT remain pending. Draft delivery is recorded below.
 
 ## Recovered slice review evidence
 
@@ -53,3 +53,25 @@ These approvals do not cover forthcoming setup/display, native app UI, or final 
 Both independent setup reviews returned `ready: false` for base `1349bc9505e7563eb5622f2bc383cb9e6b35efe8` to `b569a16bd5cd49c6d841456d1dd087400a6191a2`: an unrelated MIDI sustain could validate a missing solo attack. Musical reviewer removed the Solo track from the real fixture and reproduced the false acceptance. Coordinator removed the unproven continuation exception and added a sustaining-accompaniment/missing-entrance regression; nine setup tests passed (`/tmp/vc-mapping-repair.log`). Cross-staff ties lacking matching attack evidence now conservatively disable mapping rather than guessing. Final re-review pending.
 
 Display committed `c4f403573584478ad419d7e991c65d606c4a1d80`: six targeted display tests, full suite 74 tests/one device skip, warnings-as-errors build passed before mapping repair. Uses transport snapshot/current tempo map, no independent clock; counter ends at entrance, beat-wide cue remains visible for on-beat entrances, paused/interrupted counter freezes and cue clears, cadenza wait clears overlay. Final native verification pending.
+
+## Final reviews and native import investigation
+
+Final musical and code reviewers independently approved `e88f9c0735a5f8bb7d2646dae8dee9b37aae5122` (setup/display/final each `ready: true`) after the mapping repair; each ran 75 tests, zero failures, one optional device skip. Independent actual-export probe accepted the real bundle and verified musical positions. Subsequent picker-only deltas also received delta reviews, but native testing did not establish them as fixes.
+
+Native CUA reproduced a file-dialog confirmation stall: valid generated MIDI selected, confirmation disabled or becoming disabled without a validation/completion callback. The original type filter, no filter, and asynchronous panel presentation all reproduced it. Instrumentation established readable file, correct public.midi-audio type, canChooseFiles=true, actual selected URL, active/key visible panel with normal frame; it did not establish a source-code cause. Speculative filter/presentation changes are being reverted; temporary DEBUG-vcpanel instrumentation removed. This remains an unverified native dialog path, not a claimed repaired defect. Existing direct MIDI/WAV command-line loading is being extended with optional matching MusicXML for usable playback verification and owner trial.
+
+Independent integration verifier checked `428e359f5aa1665455677adfec00e14812698cc0`: 75 tests with warnings-as-errors, one device skip, zero failures; product build and diff check passed. Production core/setup/display probe verified actual fixture, counters, partial ninth measure, cue/entrance boundaries, threshold/staff changes, prep/transport state suppression and missing-solo MIDI rejection; all manifest hashes matched. Native picker/playback was explicitly outside this verifier's executed scope. Final source delta must be reviewed and verified again before delivery.
+
+## Final technical acceptance
+
+Tested source candidate: `10230a18c6bf6bfe7338a071bd77fe2ede018fe1`; baseline `bac300f6c940bb2ad5def48eebf2753afb98fcc6`.
+
+- Final code reviewer: setup, display, integrated code `ready: true`; reviewed all source on e88, then verified only final delta is optional third MusicXML launch argument, with original picker restored. No open findings.
+- Final musical reviewer: setup, display, final musical review `ready: true`; same final delta reviewed, no musical impact. Native fixture probe verified eight full rests, q34 cue/q34.5 entrance and rejected missing solo attack.
+- Independent integration verifier after reviews: `ready: true`; exact final-source `swift test --scratch-path /tmp/vc-final-independent-build -Xswiftc -warnings-as-errors`: 75 tests, one opt-in device skip, zero failures. Exact product warnings-as-errors build, diff check, recompiled actual-export probe and all manifest hashes passed. Logs `/tmp/vc-final-independent-tests-10230a1.log`, `/tmp/vc-final-independent-app-build-10230a1.log`, `/tmp/vc-independent-probe-10230a1.log`.
+- Coordinator release bundle built and ad-hoc signed using `Scripts/build-virtual-conductor.sh`. App `/Users/rory/Code/virtual-conductor-long-rest/.build/virtual-conductor/Virtual Conductor.app`. Matching fixture `/tmp/vc-long-rest-fixture-final`.
+- Native app launched through MIDI/WAV/MusicXML arguments, explicitly selected Solo and threshold8. Observed preparation without count; screenshots at count1/8,4/8,8/8, measure9 Beat3 cue and cue cleared. Clean-mode pause froze2/8; full-screen counter/center measure/conductor visible separately; resume and reset/replay exercised. Screenshots are in the Codex session. Exact cue/entrance boundary correctness comes from automated probes, not screenshot wall-time labels.
+- No new native companion Keep mutation, audible-quality, microphone, real-score or soloist-readability claim. File-dialog confirmation stalled under CUA; diagnosis did not establish source cause, so original picker retained. Direct-file route is usable. No owner music or recordings changed.
+- Owner trial and launch command are in `docs/musescore-rehearsal.md`; fixture generation in `docs/long-rest-fixture.md`.
+
+Delivery preserves draft PR #2 and #3 and all recovered implementation ancestry. Main remains at the baseline. No PR merge, auto-merge, ready-for-review change or Chopin lifecycle action is authorized or performed.

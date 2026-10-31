@@ -15,7 +15,7 @@ open '.build/virtual-conductor/Virtual Conductor.app'
 
 For the integrated **play → listen → keep** workflow, choose **MuseScore rehearsal…**. See [MuseScore setup and testing status](docs/musescore-rehearsal.md). The first version automates preparation, renders your timing for listening, and applies kept timing to the open MuseScore score with Undo.
 
-Use **Load new exports…** to select a matching MIDI/WAV pair. Re-export in MuseScore and use **Reread exports** after changes. Files and takes remain session-scoped. Manual export loading never alters those files. The MuseScore companion changes the open score only when you choose **Keep it**.
+Use **Load new exports…** to select a matching MIDI/WAV pair and optional matching MusicXML for long-rest cues. Select one solo staff and a positive full-measure rest threshold. Re-export in MuseScore and use **Reread exports** after changes. Files and takes remain session-scoped. Manual export loading never alters those files. The MuseScore companion changes the open score only when you choose **Keep it**.
 
 Space plays/pauses, H shows/hides controls, and Right Arrow resumes from a configured cadenza wait. Text entry and modal utilities block performance shortcuts. Output selection is app-local. Recording uses a separate input engine without monitoring; microphone permission is requested when enabling input.
 

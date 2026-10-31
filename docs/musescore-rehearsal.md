@@ -59,3 +59,20 @@ A qualifying rest displays a counter from its first full resting measure, even b
 Use the generated synthetic passage described in [Long-rest fixture](long-rest-fixture.md), then try your own supported score. Select the solo staff, set threshold eight, and play with normal preparation. Check the count during all eight full rests. Look away for two or three measures while holding your instrument, then look back and recover your place. In measure 9, check that the cue begins on beat 3 before the and-of-3 entrance. Repeat with controls hidden (H) and in full screen. Try pause/resume and reset/replay.
 
 Judge readability from your normal playing distance, whether the cue attracts attention, and whether its placement obscures the conductor or measure number. Size, placement and prominence remain adjustable. This trial evaluates usability; automated timing checks cannot establish soloist readability.
+
+### Verification of the long-rest implementation
+
+Source candidate `10230a18c6bf6bfe7338a071bd77fe2ede018fe1` was independently reviewed for musical correctness and code quality, then independently verified: all three returned `ready: true`. The final warnings-as-errors suite passed 75 tests with one existing opt-in device skip, and the app build passed. Actual MuseScore exports were checked against the production parser, setup and display. A missing solo MIDI track is rejected instead of allowing accompaniment to justify the entrance.
+
+Native app playback through the direct-file loader was exercised with the generated bundle. Screenshots showed preparation without a rest count, 1/8, 4/8, 8/8, and the measure-9 Beat 3 entrance cue followed by its removal. Clean-mode pause held 2/8 while stopped; full-screen showed the counter separately from the center measure and conductor, and resume worked. Exact partial-measure and cue boundaries are established by automated tests/probes; screen captures are observations, not timing measurements. Physical sound quality and instrument-playing readability were not established.
+
+The native file dialog stalled under automation after selecting a valid file, so its confirmation path remains unverified. Type-filter and asynchronous-presentation experiments did not establish a fix and were removed. Direct loading is a verified alternative; quit any running app instance first, then run from this checkout:
+
+```sh
+'.build/virtual-conductor/Virtual Conductor.app/Contents/MacOS/VirtualConductor' \
+  /tmp/vc-long-rest-fixture-final/long-rest.mid \
+  /tmp/vc-long-rest-fixture-final/long-rest.wav \
+  /tmp/vc-long-rest-fixture-final/long-rest.musicxml
+```
+
+The third argument is optional. It follows the same parsing, timeline checks and manual staff-selection flow as normal loading. For your own exports, substitute their three matching paths. The native MuseScore companion/Keep interaction was not newly exercised; automated Keep propagation and failure checks passed. See [durable progress and review evidence](long-rest-progress.md) for recovery history and exact checks.
