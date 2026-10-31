@@ -185,7 +185,7 @@ struct FollowingConfiguration: Codable {
         // A configured wait at the return still requires its entrance or this explicit cue.
         approvedWaits.insert(range.end)
         if let index = tracker.index, abs(plan!.notes[index].startQuarter - range.end) < 1e-7 {
-            tracker.beginAccompaniedPhrase(scoreTime: prepared!.midi.seconds(atQuarter: range.end))
+            tracker.beginAccompaniedPhrase(scoreTime: prepared!.midi.seconds(atQuarter: range.end), tolerance: tolerance / 100)
         } else {
             tracker.reset(notes: plan!.notes, quarter: range.end)
         }
@@ -194,7 +194,7 @@ struct FollowingConfiguration: Codable {
 
     func tick() {
         guard active, let audio, let prepared, let plan else { return }
-        let now = clock(), delta = min(0.1, max(0, now - lastTick)); lastTick = now
+        let now = clock(), delta = min(0.1, max(0, now - max(entered, lastTick))); lastTick = now
         guard capture.ready else { inputFailed(); return }
         poll(now: now)
         do {
@@ -213,8 +213,11 @@ struct FollowingConfiguration: Codable {
                 let expectingSound = plan.notes.contains { $0.startQuarter <= q && q < $0.endQuarter }
                 let age = now - tracker.lastMatch
                 let phaseError = note.map { min(seconds($0.endQuarter), seconds($0.startQuarter) + (now - tracker.lastAttack) * tracker.rate) - position } ?? 0
+                // A written rest is expected silence. Carry the established pace
+                // through it without steering toward the previous note's end.
+                let restingAfterMatch = !expectingSound && note != nil && age < 1.5
                 let rate = tempo.update(delta: delta, tolerance: tolerance / 100, trackedRate: tracker.rate,
-                                        phaseError: phaseError, age: expectingSound ? age : 10)
+                                        phaseError: expectingSound ? phaseError : 0, age: restingAfterMatch ? 0 : age)
                 audio.setRate(rate)
                 status = expectingSound && age > 1.5 ? .lost : .following
                 detail = status == .lost ? "Keeping moving · listening for your position" : "Following within ±\(Int(tolerance))%"
@@ -252,6 +255,16 @@ struct FollowingConfiguration: Codable {
         } catch { fail(error) }
     }
 
+    func expectedReturnPitch(at time: Double) -> Int? {
+        guard case .free(let range) = phase, let plan, let index = tracker.index,
+              plan.notes.indices.contains(index + 1), time - tracker.lastMatch < 0.4 else { return nil }
+        let next = plan.notes[index + 1]
+        guard abs(next.startQuarter - range.end) < 1e-7, next.pitch != plan.notes[index].pitch,
+              !plan.waits.contains(where: { $0 >= range.start && $0 <= range.end && !approvedWaits.contains($0) })
+        else { return nil }
+        return next.pitch
+    }
+
     private func poll(now: Double) {
         guard let storage = capture.storage else { return }
         level = storage.peak.load(ordering: .relaxed)
@@ -281,11 +294,22 @@ struct FollowingConfiguration: Codable {
         let tail = incoming.suffix(hop)
         let silent = sqrt(tail.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(tail.count)) < 0.0015
         let attack = rearticulated
+        let expected = expectedReturnPitch(at: now)
         Task {
-            let pitch = await Task.detached(priority: .userInitiated) { silent ? nil : LivePitch.detect(samples: samples, sampleRate: rate) }.value
+            let (pitch, confirmed) = await Task.detached(priority: .userInitiated) { () -> (Int?, Bool) in
+                if silent { return (nil, false) }
+                if let expected, LivePitch.confirmsReturn(expected, samples: samples, sampleRate: rate) { return (expected, true) }
+                return (LivePitch.detect(samples: samples, sampleRate: rate), false)
+            }.value
             guard token == generation, active else { return }
             analyzing = false
             guard clock() - now < 0.25 else { status = .lost; return }
+            if confirmed {
+                guard expectedReturnPitch(at: now) == pitch else { return }
+                observe(pitch: pitch, time: now - 0.022)
+                observe(pitch: pitch, time: now - 0.012)
+                return
+            }
             let observedAt = silent ? now : now - Double(samples.count) / (2 * rate)
             observe(pitch: pitch, time: observedAt, rearticulated: attack)
         }
@@ -313,8 +337,9 @@ struct FollowingConfiguration: Codable {
             case .free(let range):
                 if let wait = plan.waits.first(where: { $0 >= range.start && $0 <= q && $0 < range.end && !approvedWaits.contains($0) }) {
                     if abs(wait - q) < 1e-7 { approvedWaits.insert(wait) }
-                    else { try enter(at: seconds(wait)) }
+                    else { try enter(at: seconds(wait)); return }
                 }
+                if abs(q - range.end) < 1e-7 { try returnFromFree(range) }
             case .audio:
                 // Queue a recognized near-boundary entrance without restarting the nodes.
                 if plan.waits.contains(q), abs(seconds(q) - audioEnd) < 1e-7,

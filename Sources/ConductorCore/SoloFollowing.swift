@@ -82,6 +82,7 @@ public struct SoloTracker: Sendable {
     private var silentFrames = 0
     private var anchors: [(scoreTime: Double, hostTime: Double)] = []
     private var candidateSince = 0.0
+    private var previousFrameTime: Double?
     private var searchStart = 0
 
     public init() {}
@@ -92,10 +93,15 @@ public struct SoloTracker: Sendable {
         searchStart = notes.firstIndex { $0.endQuarter > quarter + 1e-7 } ?? notes.count
     }
 
-    public mutating func beginAccompaniedPhrase(scoreTime: Double) {
+    public mutating func beginAccompaniedPhrase(scoreTime: Double, tolerance: Double) {
         // The return starts at planned tempo. Keep the recognized attack so a
         // sustained return note is not mistaken for a second entrance.
-        rate = 1
+        // Let a steady, in-tolerance lead-in guide the gradual adjustment after
+        // the downbeat. A freely stretched or uneven lead-in supplies no pace.
+        let steady = anchors.count >= 3 && anchors.allSatisfy { anchor in
+            abs((lastAttack - anchor.hostTime) * rate - (scoreTime - anchor.scoreTime)) < 0.04
+        }
+        if !steady || abs(rate - 1) > tolerance { rate = 1 }
         anchors = [(scoreTime, lastAttack)]
     }
 
@@ -103,6 +109,8 @@ public struct SoloTracker: Sendable {
     public mutating func observe(pitch: Int?, time: Double, notes: [MIDINote], expectedQuarter: Double,
                                  free: Bool, midi: MIDIFile, rearticulated: Bool = false,
                                  throughQuarter: Double = .infinity) -> Int? {
+        let frameInterval = previousFrameTime.map { min(0.04, max(0, time - $0)) } ?? 0
+        previousFrameTime = time
         guard let pitch else {
             silentFrames += 1
             if silentFrames >= 2 { previousPitch = nil; if releasedAt == nil { releasedAt = time } }
@@ -110,7 +118,7 @@ public struct SoloTracker: Sendable {
             return nil
         }
         silentFrames = 0
-        if candidatePitch == pitch { candidateCount += 1 } else { candidatePitch = pitch; candidateCount = 1; candidateSince = time }
+        if candidatePitch == pitch { candidateCount += 1 } else { candidatePitch = pitch; candidateCount = 1; candidateSince = time - frameInterval / 2 }
         guard candidateCount >= 2 else { return nil }
         let repeatedAccent = previousPitch == pitch && rearticulated
         let attack = previousPitch != pitch || repeatedAccent
@@ -141,11 +149,22 @@ public struct SoloTracker: Sendable {
         let scoreTime = midi.seconds(atQuarter: notes[match].startQuarter)
         // Estimate pace over a short phrase. A frame of onset jitter on a single
         // triplet should not drive the accompaniment all the way to its tempo limit.
-        while anchors.count > 1 && onset - anchors[0].hostTime > 1.2 { anchors.removeFirst() }
-        if let anchor = anchors.first, onset - anchor.hostTime > 0.08 {
-            rate = min(4, max(0.1, (scoreTime - anchor.scoreTime) / (onset - anchor.hostTime)))
-        }
+        while anchors.count > 1 && onset - anchors[1].hostTime >= 1.2 { anchors.removeFirst() }
         anchors.append((scoreTime, onset))
+        if onset - anchors[0].hostTime > 0.08 {
+            // Fit all the attacks so one late triplet does not set the pace
+            // throughout the long note or written rest that follows it.
+            let count = Double(anchors.count)
+            let meanHost = anchors.reduce(0) { $0 + ($1.hostTime - onset) } / count
+            let meanScore = anchors.reduce(0) { $0 + ($1.scoreTime - scoreTime) } / count
+            var covariance = 0.0, variance = 0.0
+            for anchor in anchors {
+                let dt = (anchor.hostTime - onset) - meanHost
+                covariance += dt * ((anchor.scoreTime - scoreTime) - meanScore)
+                variance += dt * dt
+            }
+            rate = min(4, max(0.1, covariance / variance))
+        }
         index = match; lastMatch = time; lastAttack = onset; releasedAt = nil
         return match
     }
@@ -178,10 +197,10 @@ public struct FollowingTempo: Sendable {
     public mutating func update(delta: Double, tolerance: Double, trackedRate: Double, phaseError: Double, age: Double) -> Double {
         let bound = min(0.75, max(0, tolerance))
         let target: Double
-        if age < 0.6 { target = min(1 + bound, max(1 - bound, trackedRate + phaseError * 0.2)) }
+        if age < 0.6 { target = min(1 + bound, max(1 - bound, trackedRate + phaseError * 1.8)) }
         else if age < 1.5 { target = rate }
         else { target = 1 }
-        rate += (target - rate) * (1 - exp(-max(0, delta) / 0.35))
+        rate += (target - rate) * (1 - exp(-max(0, delta) / 0.20))
         rate = min(1 + bound, max(1 - bound, rate))
         return rate
     }
@@ -190,13 +209,29 @@ public struct FollowingTempo: Sendable {
 /// A small YIN detector for one live analysis window; work runs off the audio tap.
 public enum LivePitch {
     public static func detect(samples: [Float], sampleRate: Double, floor: Double = 0.003) -> Int? {
-        guard sampleRate.isFinite, sampleRate >= 4000, sampleRate <= 384000, samples.count >= 512 else { return nil }
+        detect(samples: samples[...], sampleRate: sampleRate, floor: floor, minimumCount: 512)
+    }
+
+    /// Two short windows can confirm a known return pitch with less delay.
+    /// Lower notes need the ordinary longer window to resolve the fundamental.
+    public static func confirmsReturn(_ pitch: Int, samples: [Float], sampleRate: Double) -> Bool {
+        guard pitch >= 52, sampleRate.isFinite, (4000...384000).contains(sampleRate) else { return false }
+        let length = max(256 * max(1, Int(sampleRate / 12000)), Int(0.024 * sampleRate))
+        let hop = Int(0.010 * sampleRate)
+        guard samples.count >= length + hop else { return false }
+        let recent = samples.suffix(length)
+        return detect(samples: recent, sampleRate: sampleRate, floor: 0.003, minimumCount: 256) == pitch &&
+            detect(samples: samples.dropLast(hop).suffix(length), sampleRate: sampleRate, floor: 0.003, minimumCount: 256) == pitch
+    }
+
+    private static func detect(samples: ArraySlice<Float>, sampleRate: Double, floor: Double, minimumCount: Int) -> Int? {
+        guard sampleRate.isFinite, sampleRate >= 4000, sampleRate <= 384000, samples.count >= minimumCount else { return nil }
         let factor = max(1, Int(sampleRate / 12000)), rate = sampleRate / Double(factor)
         let count = samples.count / factor
-        guard count >= 512 else { return nil }
+        guard count >= minimumCount else { return nil }
         var pcm = [Double](repeating: 0, count: count)
         for i in pcm.indices {
-            for j in 0..<factor { pcm[i] += Double(samples[i * factor + j]) / Double(factor) }
+            for j in 0..<factor { pcm[i] += Double(samples[samples.startIndex + i * factor + j]) / Double(factor) }
         }
         guard pcm.allSatisfy(\.isFinite), sqrt(pcm.reduce(0) { $0 + $1 * $1 } / Double(count)) >= floor else { return nil }
         let size = count / 2, maximum = min(size - 1, Int(rate / 55)), minimum = max(2, Int(rate / 1800))

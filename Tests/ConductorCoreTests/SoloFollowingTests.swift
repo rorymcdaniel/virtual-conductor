@@ -63,6 +63,51 @@ final class SoloFollowingTests: XCTestCase {
         XCTAssertNil(tracker.index)
     }
 
+    func testSteadyLeadInKeepsTheOrchestraAlignedThroughAHeldReturnNote() throws {
+        let midi = try FollowingFixture.midi()
+        let beats = [0.0, 2, 4, 4 + 1.0/3, 4 + 2.0/3, 5, 9]
+        let notes = zip(beats, beats.dropFirst()).enumerated().map {
+            MIDINote(pitch: 60 + $0.offset, startQuarter: $0.element.0, endQuarter: $0.element.1)
+        }
+        for pace in [0.94, 1.06, 1.6] {
+            var tracker = SoloTracker(), tempo = FollowingTempo()
+            for note in notes {
+                let onset = midi.seconds(atQuarter: note.startQuarter) / pace
+                for t in [onset, onset + 0.015] {
+                    tracker.observe(pitch: note.pitch, time: t, notes: notes, expectedQuarter: note.startQuarter, free: true, midi: midi)
+                }
+            }
+            let scoreTime = midi.seconds(atQuarter: 5)
+            tracker.beginAccompaniedPhrase(scoreTime: scoreTime, tolerance: 0.1)
+            XCTAssertEqual(tempo.rate, 1)
+            if pace > 1.1 {
+                XCTAssertEqual(tracker.rate, 1, "Extreme rubato must not set the return tempo")
+                continue
+            }
+            var position = scoreTime
+            for frame in 1...90 {
+                let elapsed = Double(frame) * 0.02
+                let target = scoreTime + (elapsed + 0.035) * pace
+                let rate = tempo.update(delta: 0.02, tolerance: 0.1, trackedRate: tracker.rate,
+                                        phaseError: target - position, age: 0)
+                XCTAssertTrue((0.9...1.1).contains(rate))
+                position += 0.02 * rate
+                XCTAssertLessThan(abs(position - target), 0.055)
+            }
+        }
+    }
+
+    func testShortReturnConfirmationRequiresTheExpectedPitchInBothWindows() {
+        let rate = 12000.0
+        func signal(_ pitch: Int, _ count: Int) -> [Float] {
+            let hz = 440 * pow(2, Double(pitch - 69) / 12)
+            return (0..<count).map { Float(0.15 * sin(2 * .pi * hz * Double($0) / rate)) }
+        }
+        XCTAssertTrue(LivePitch.confirmsReturn(70, samples: signal(70, 540), sampleRate: rate))
+        XCTAssertFalse(LivePitch.confirmsReturn(70, samples: signal(58, 540), sampleRate: rate))
+        XCTAssertFalse(LivePitch.confirmsReturn(70, samples: signal(58, 420) + signal(70, 120), sampleRate: rate))
+    }
+
     func testTripletTempoUsesThePhraseDespiteFrameTimingJitter() throws {
         let midi = try FollowingFixture.midi(), pace = 0.94
         let notes = (0..<8).map { MIDINote(pitch: 60 + $0, startQuarter: Double($0)/3, endQuarter: Double($0+1)/3) }

@@ -157,3 +157,19 @@ existing export picker kept its confirmation button disabled for the generated
 MIDI. File-type-filter experiments did not resolve it and were reverted; a full
 loaded-score UI walkthrough remains unverified. Real microphone/device binding,
 instrument recognition, and perceived audio timing still need an owner trial.
+
+Strauss opening replay, 2026-10-31. The orchestra starts at planned tempo on
+the recognized return. A steady lead-in within the tolerance can guide the
+next tempo adjustments even while the soloist holds the return note. Uneven
+or extreme rubato still leaves the return at planned tempo until fresh attacks
+establish a pace.
+
+A local check used the matching Strauss exports and a synthetic horn playing
+the written opening at 94%, 100%, and 106% of planned tempo, with 10% tolerance.
+The check rendered the accompaniment WAV offline through Apple's pitch-preserving
+time stretch at the rates commanded by the follower. It compared 21 distinct
+orchestral attack positions against the horn timeline, measuring the two exposed
+entrances by their rise from silence and locating the others by matching short
+stretches of the recorded sound to the source WAV. Approximate worst absolute
+offsets changed from 96 to 51 ms, 68 to 48 ms, and 168 to 52 ms, respectively.
+The replay excludes physical microphone and headphone latency.
