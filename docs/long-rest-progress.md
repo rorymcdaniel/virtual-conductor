@@ -21,8 +21,8 @@ Inspected all three retained run checkouts (b8daddcd, 133185a4, 72b0adc7), all l
 Integration branch `codex/long-rest-cues`, isolated checkout `/Users/rory/Code/virtual-conductor-long-rest`.
 
 - Export/reader/schedule: recovered; independent musical and technical reviews passed (`ready: true`).
-- Setup: vc-implementer owns PerformanceModel.swift, MainView.swift, new setup/mapping files and tests.
-- Display: pending setup integration; ownership reserved for separate implementation.
+- Setup: implemented at `b569a16bd5cd49c6d841456d1dd087400a6191a2`; independent reviews underway.
+- Display: vc-implementer owns ConductorSurface.swift, new display-state logic and tests; implementing against committed setup.
 - Final musical/code reviews and then independent integration verification: pending.
 - Full recovered `swift test`: 60 tests, 1 existing opt-in device skip, zero failures (2026-10-30).
 
@@ -40,3 +40,10 @@ Reviewed base `bac300f6c940bb2ad5def48eebf2753afb98fcc6` and candidate `970150c1
 - Native export initial attempt: MuseScore CLI exited 40 before output from an initial synthetic fixture; only startup message logged. This is not export validation. Fixture implementer investigating bounded exports independently without closing the owner's MuseScore.
 
 These approvals do not cover forthcoming setup/display, native app UI, or final integration.
+
+## Setup and native fixture
+
+- Setup `b569a16bd5cd49c6d841456d1dd087400a6191a2`: eight targeted tests passed; full suite 68 tests, one opt-in device skip; warnings-as-errors app build passed. Staff selection, threshold, bare imports, unsupported mapping, replacement, stale results and Keep covered.
+- Actual MuseScore mapping probe exposed final MIDI quarter 35.95 versus MusicXML 36. Last solo attack 34.5/off 35.9229167; final accompaniment off 35.9479167 at 480 PPQN. Mapping accepts articulated final-measure tails, requires bidirectional attack compatibility, and rejects extra/missing whole measures. Native probe then verified 2 staves, 8 full rests, cue 34 and entrance 34.5. Temporary probe removed; regression retained in setup tests.
+- Synthetic fixture tooling committed at `1349bc9505e7563eb5622f2bc383cb9e6b35efe8`. Two successful actual MuseScore export runs; final bundle `/tmp/vc-long-rest-fixture-final/long-rest.{mscz,mid,wav,musicxml}`. Source/native hashes unchanged; WAV readable stereo 44.1 kHz with render tail. See `docs/long-rest-fixture.md`.
+- Native accessibility and screenshot tools now work. Owner's existing unsaved MuseScore score was observed only; it was not changed or closed. Native Virtual Conductor playback remains pending.
