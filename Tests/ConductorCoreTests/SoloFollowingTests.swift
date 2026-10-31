@@ -202,7 +202,7 @@ final class SoloFollowingTests: XCTestCase {
     var sampleRate = 8000.0
     var ready = false
     var interrupted: (() -> Void)?
-    func enable(device: UInt32, streaming: Bool) throws { ready = true }
+    func startStreaming(device: UInt32) async throws { ready = true }
     func release() { ready = false }
 }
 @MainActor private final class FollowingTestAudio: FollowingAudio {

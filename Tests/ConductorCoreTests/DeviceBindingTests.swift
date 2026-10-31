@@ -15,16 +15,24 @@ final class DeviceBindingTests: XCTestCase {
         let capture = InputCapture()
         var interrupted = false
         audio.interrupted = { interrupted = true }
-        try capture.enable(device:input.id)
+        capture.interrupted = { [weak capture] in
+            XCTFail("The selected microphone was interrupted during startup")
+            capture?.release()
+        }
         defer { capture.release() }
-        // Meter briefly with capture recording disabled; retain no microphone samples.
-        try await Task.sleep(for:.milliseconds(500))
-        XCTAssertTrue(capture.ready)
-        XCTAssertGreaterThan(capture.storage?.receivedFrames.load(ordering:.acquiring) ?? 0,0)
-        XCTAssertEqual(capture.storage?.count.load(ordering:.acquiring),0)
+        // Some USB microphones post their startup notification only on a
+        // subsequent Start. Exercise the same release/rebind cycle as Reset.
+        for _ in 0..<3 {
+            try await capture.startStreaming(device:input.id)
+            try await Task.sleep(for:.milliseconds(750))
+            XCTAssertTrue(capture.ready)
+            XCTAssertGreaterThan(capture.storage?.receivedFrames.load(ordering:.acquiring) ?? 0,0)
+            XCTAssertEqual(capture.storage?.count.load(ordering:.acquiring),0)
+            capture.release()
+        }
         XCTAssertFalse(interrupted)
         XCTAssertEqual(AudioDevices.boundID(audio.engine.outputNode),output.id)
         XCTAssertTrue(audio.ready)
-        print("App-local output: \(output.name) [\(output.id)]; separate input: \(input.name) [\(input.id)]. Input engine active for 500 ms with recording disabled; no microphone samples retained.")
+        print("App-local output: \(output.name) [\(output.id)]; separate input: \(input.name) [\(input.id)]. Three successful microphone starts with recording disabled; no microphone samples retained.")
     }
 }

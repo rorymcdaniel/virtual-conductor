@@ -46,7 +46,38 @@ final class CaptureStorage: @unchecked Sendable {
     private(set) var sampleRate: Double = 0
     private var observer: NSObjectProtocol?
     private var configuration: UInt64 = 0
+    private var settling: UInt64?
     var interrupted: (() -> Void)?
+
+    func startStreaming(device: UInt32) async throws {
+        try enable(device: device, streaming: true)
+        let identity = configuration
+        settling = identity
+        defer { if settling == identity { settling = nil } }
+        guard let engine, let storage else { throw NativeError.message("Microphone unavailable.") }
+        var previousFrames = storage.receivedFrames.load(ordering: .acquiring)
+        var healthyIntervals = 0
+        for _ in 0..<12 {
+            try await Task.sleep(for: .milliseconds(100))
+            guard configuration == identity else { throw CancellationError() }
+            guard AudioDevices.boundID(engine.inputNode) == device else { break }
+            if !engine.isRunning {
+                // Core Audio can stop the input unit while finishing its initial
+                // device binding. Restart only this same route, before the upbeat.
+                healthyIntervals = 0
+                try engine.start()
+            } else {
+                let frames = storage.receivedFrames.load(ordering: .acquiring)
+                healthyIntervals = frames > previousFrames ? healthyIntervals + 1 : 0
+                previousFrames = frames
+                if healthyIntervals >= 2 {
+                    _ = storage.stream?.drain()
+                    return
+                }
+            }
+        }
+        throw NativeError.message("The selected microphone did not start delivering audio. Check the input in Live following and try again.")
+    }
     func enable(device: UInt32, streaming: Bool = false) throws {
         release()
         let engine = AVAudioEngine()
@@ -61,7 +92,22 @@ final class CaptureStorage: @unchecked Sendable {
         guard AudioDevices.boundID(engine.inputNode) == device else { engine.stop(); engine.inputNode.removeTap(onBus:0); throw NativeError.message("Input device changed unexpectedly.") }
         self.engine = engine; self.storage = storage; sampleRate = format.sampleRate
         let identity = configuration
-        observer = NotificationCenter.default.addObserver(forName:.AVAudioEngineConfigurationChange,object:engine,queue:nil) { [weak self] _ in Task { @MainActor in guard let self, self.configuration == identity else { return }; self.interrupted?() } }
+        observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.configuration == identity, self.settling != identity, let engine = self.engine else { return }
+                // USB input binding can post this notification immediately after a
+                // successful start. Verify the route and tap before pausing playback.
+                guard engine.isRunning, AudioDevices.boundID(engine.inputNode) == device,
+                      engine.inputNode.outputFormat(forBus: 0).isEqual(format) else {
+                    self.interrupted?()
+                    return
+                }
+                let frames = storage.receivedFrames.load(ordering: .acquiring)
+                do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+                guard self.configuration == identity else { return }
+                if storage.receivedFrames.load(ordering: .acquiring) == frames { self.interrupted?() }
+            }
+        }
     }
     var ready: Bool { engine?.isRunning == true }
     func start() throws {

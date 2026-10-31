@@ -16,7 +16,7 @@ extension PerformanceAudio: FollowingAudio {}
     var sampleRate: Double { get }
     var ready: Bool { get }
     var interrupted: (() -> Void)? { get set }
-    func enable(device: UInt32, streaming: Bool) throws
+    func startStreaming(device: UInt32) async throws
     func release()
 }
 extension InputCapture: FollowingInput {}
@@ -109,7 +109,8 @@ struct FollowingConfiguration: Codable {
             }
         }.value
         guard token == generation else { throw CancellationError() }
-        try capture.enable(device: inputID, streaming: true)
+        try await capture.startStreaming(device: inputID)
+        guard token == generation else { throw CancellationError() }
         self.prepared = prepared; self.plan = plan; self.audio = audio
         buffers = Dictionary(uniqueKeysWithValues: segments.map { ($0.position, $0) }); boundaries = limits
         self.position = position; active = true; lastTick = clock(); lastObservation = lastTick; droppedSamples = 0

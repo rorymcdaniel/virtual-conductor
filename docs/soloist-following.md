@@ -100,6 +100,9 @@ implementation is available through **Live following…** in the app.
 
 - Pitch-preserving time stretching adjusts the existing WAV and its clicks
   together. The conducting position uses the adjusted playback clock.
+- Start opens the selected microphone and waits for it to deliver audio before
+  the preparatory gesture. A USB input that briefly stops while being connected
+  gets a startup retry on the same device. The full configured count-in follows.
 - Live analysis uses a bounded microphone queue, short pitch-analysis windows,
   and local phrase matching. It tolerates nearby skipped/wrong notes and detects
   repeated-pitch articulation from amplitude dips. It is not a general-purpose
