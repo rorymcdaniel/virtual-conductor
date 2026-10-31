@@ -22,6 +22,7 @@ cp "$BIN/VirtualConductor" "$APP/Contents/MacOS/VirtualConductor"
 for bundle in "$BIN"/*.bundle; do
     if [ -d "$bundle" ]; then cp -R "$bundle" "$APP/Contents/Resources/"; fi
 done
+cp AppResources/VirtualConductor/Conductor.icns "$APP/Contents/Resources/"
 cp AppResources/VirtualConductor/Info.plist "$APP/Contents/Info.plist"
 # Use a consistent identity so local updates retain microphone permission.
 # An explicit override also resolves machines with multiple developers.
