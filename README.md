@@ -21,6 +21,14 @@ Space plays/pauses, H shows/hides controls, and Right Arrow resumes from a confi
 
 Cadenza settings are stored in `~/Library/Application Support/VirtualConductor/cadenzas-v1.json`, keyed by exact MIDI SHA-256. Browser settings can be imported explicitly through the versioned JSON bridge. Changed MIDI does not inherit old boundaries.
 
+## Recorded-performance timing
+
+To prepare accompaniment that follows an existing performer's recording, use
+the [recorded-performance tempo transfer process](docs/performance-tempo-transfer.md).
+It creates a separate timed MuseScore score, horn-free accompaniment, and matching
+exports for this app, with a local listening review and correctable landmarks.
+WAV and matching MusicXML are the tested inputs; live following can remain off.
+
 ## Live soloist following
 
 Load matching MusicXML with the MIDI and accompaniment WAV, then choose **Live following…**. Select the solo staff and microphone, enable following, and add any explicit wait points by measure and beat. The dialog shows the expected concert pitch from MusicXML. Save and start playback using headphones. The tempo tolerance defaults to ±10% and is configurable globally.
