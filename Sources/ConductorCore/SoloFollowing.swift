@@ -92,6 +92,9 @@ public struct SoloTracker: Codable, Sendable {
     private var candidateSince = 0.0
     private var previousFrameTime: Double?
     private var searchStart = 0
+    // Optional so diagnostics saved before confidence tracking remain readable.
+    private var tempoConfirmed: Bool? = false
+    public var hasReliableTempo: Bool { tempoConfirmed ?? (anchors.count >= 3) }
 
     public init() {}
     public func validForReplay(noteCount: Int) -> Bool {
@@ -120,7 +123,8 @@ public struct SoloTracker: Codable, Sendable {
         let steady = anchors.count >= 3 && anchors.allSatisfy { anchor in
             abs((lastAttack - anchor.hostTime) * rate - (scoreTime - anchor.scoreTime)) < 0.04
         }
-        if !steady || abs(rate - 1) > tolerance { rate = 1 }
+        tempoConfirmed = steady && abs(rate - 1) <= tolerance
+        if !hasReliableTempo { rate = 1 }
         anchors = [Anchor(scoreTime: scoreTime, hostTime: lastAttack)]
     }
 
@@ -153,22 +157,40 @@ public struct SoloTracker: Codable, Sendable {
             return nil
         }
         guard attack else { return nil }
-        let lower = max(searchStart, (index ?? (searchStart - 1)) + 1)
-        var candidates = Array(lower..<min(notes.count, lower + (free ? 3 : 8)))
+        let next = max(searchStart, (index ?? (searchStart - 1)) + 1)
+        let lower = !free && !hasReliableTempo ? searchStart : next
+        var candidates = Array(next..<min(notes.count, next + (free ? 3 : 8)))
         if !free {
-            // Permit reacquisition near the sounding accompaniment after extended loss.
-            candidates += notes.indices.filter { abs(notes[$0].startQuarter - expectedQuarter) < 4 && $0 >= lower }
+            // Reacquire near the accompaniment, including behind a doubtful
+            // match. A pitch several beats ahead cannot establish a new pace.
+            let expectedTime = midi.seconds(atQuarter: expectedQuarter)
+            let beat = midi.seconds(atQuarter: expectedQuarter + 1) - expectedTime
+            let window = max(0.18, min(0.6, beat * 0.75))
+            let earliest = midi.quarter(atSeconds: expectedTime - window)
+            let latest = midi.quarter(atSeconds: expectedTime + window)
+            candidates = notes.indices.filter {
+                $0 >= lower && notes[$0].startQuarter >= earliest && notes[$0].startQuarter <= latest
+            }
         }
-        if repeatedAccent, let index, notes[index].pitch == pitch { candidates = lower < notes.count ? [lower] : [] }
+        if repeatedAccent, let index, notes[index].pitch == pitch { candidates = candidates.filter { $0 == next } }
         guard let match = candidates.filter({ notes[$0].pitch == pitch && notes[$0].startQuarter <= throughQuarter + 1e-7 }).min(by: {
             if free { return $0 < $1 }
             return abs(notes[$0].startQuarter - expectedQuarter) < abs(notes[$1].startQuarter - expectedQuarter)
-        }) else { return nil }
+        }) else {
+            // An unrecognized pitch supplies no timing evidence. Keep the
+            // previous phrase so the next correct attack can corroborate it.
+            if !free { tempoConfirmed = false }
+            return nil
+        }
+        // Position recovery is useful without being evidence of faster playing.
+        // Start a new phrase after a skipped or backwards match; retain its last
+        // trusted pace until subsequent attacks corroborate the new position.
+        if !free, let index, match != index + 1 { anchors = []; tempoConfirmed = false }
         let onset = repeatedAccent ? time : candidateSince
         let scoreTime = midi.seconds(atQuarter: notes[match].startQuarter)
         // Estimate pace over a short phrase. A frame of onset jitter on a single
         // triplet should not drive the accompaniment all the way to its tempo limit.
-        while anchors.count > 1 && onset - anchors[1].hostTime >= 1.2 { anchors.removeFirst() }
+        while anchors.count > (free ? 1 : 2) && onset - anchors[1].hostTime >= 1.2 { anchors.removeFirst() }
         anchors.append(Anchor(scoreTime: scoreTime, hostTime: onset))
         if onset - anchors[0].hostTime > 0.08 {
             // Fit all the attacks so one late triplet does not set the pace
@@ -182,7 +204,22 @@ public struct SoloTracker: Codable, Sendable {
                 covariance += dt * ((anchor.scoreTime - scoreTime) - meanScore)
                 variance += dt * dt
             }
-            rate = min(4, max(0.1, covariance / variance))
+            let fitted = covariance / variance
+            let coherent = anchors.allSatisfy {
+                abs(($0.hostTime - onset) * fitted - ($0.scoreTime - scoreTime)) <= 0.10
+            } && zip(anchors, anchors.dropFirst()).allSatisfy { previous, current in
+                let predicted = (current.scoreTime - previous.scoreTime) / fitted
+                let observed = current.hostTime - previous.hostTime
+                // A plausible average is insufficient when individual intervals
+                // alternate between rushed and delayed, as false recovery can.
+                return predicted > 0 && abs(observed - predicted) <= max(0.04, predicted * 0.25)
+            }
+            if free { rate = min(4, max(0.1, fitted)) }
+            else {
+                tempoConfirmed = anchors.count >= 3 && onset - anchors[0].hostTime >= 0.6 &&
+                    fitted.isFinite && (0.1...4).contains(fitted) && coherent
+                if hasReliableTempo { rate = fitted }
+            }
         }
         index = match; lastMatch = time; lastAttack = onset; releasedAt = nil
         return match
@@ -207,18 +244,17 @@ public struct LiveArticulation: Sendable {
     }
 }
 
-/// Smoothed bounded rate control. Loss falls back to the planned tempo; phase
-/// correction never changes the playback position or exceeds the user's limit.
+/// Smoothed bounded rate control. Uncertain or stale tracking holds the current
+/// rate; only a trusted phrase may steer tempo or position within the user's limit.
 public struct FollowingTempo: Sendable {
     public private(set) var rate = 1.0
     public init() {}
     public mutating func reset() { rate = 1 }
-    public mutating func update(delta: Double, tolerance: Double, trackedRate: Double, phaseError: Double, age: Double) -> Double {
+    public mutating func update(delta: Double, tolerance: Double, trackedRate: Double, phaseError: Double, age: Double, reliable: Bool = true) -> Double {
         let bound = min(0.75, max(0, tolerance))
         let target: Double
-        if age < 0.6 { target = min(1 + bound, max(1 - bound, trackedRate + phaseError * 1.8)) }
-        else if age < 1.5 { target = rate }
-        else { target = 1 }
+        if reliable && age < 0.6 { target = min(1 + bound, max(1 - bound, trackedRate + phaseError * 1.8)) }
+        else { target = rate }
         rate += (target - rate) * (1 - exp(-max(0, delta) / 0.20))
         rate = min(1 + bound, max(1 - bound, rate))
         return rate

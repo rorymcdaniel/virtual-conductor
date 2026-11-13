@@ -38,6 +38,15 @@ import ConductorCore
         XCTAssertTrue(report.replay().isEmpty)
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: report.encoded()) as? [String: Any])
         var decisions = try XCTUnwrap(json["decisions"] as? [[String: Any]])
+        let legacyDecisions = decisions.map { decision -> [String: Any] in
+            var decision = decision
+            var tracker = decision["tracker"] as! [String: Any]
+            tracker.removeValue(forKey: "tempoConfirmed")
+            decision["tracker"] = tracker
+            return decision
+        }
+        var legacy = json; legacy["decisions"] = legacyDecisions
+        XCTAssertEqual(try FollowingDiagnostic.decode(JSONSerialization.data(withJSONObject: legacy)).decisions.count, decisions.count)
         var invalidTracker = try XCTUnwrap(decisions[0]["tracker"] as? [String: Any])
         invalidTracker["index"] = 999999
         decisions[0]["tracker"] = invalidTracker; json["decisions"] = decisions
