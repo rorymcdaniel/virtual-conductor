@@ -148,19 +148,25 @@ struct FollowingBanner: View {
     @ObservedObject var following: LiveFollowing
     var body: some View {
         if following.active {
-            VStack(spacing: 5) {
+            VStack(alignment: .leading, spacing: 4) {
                 Label(following.status.rawValue, systemImage: icon)
-                    .font(.system(size: following.status == .following ? 20 : 30, weight: .bold))
-                Text(following.detail).font(.callout)
-                ProgressView(value: min(1, Double(following.level) * 5)).frame(width: 160)
+                    .font(.system(size: 18, weight: .bold))
+                Text(following.detail).font(.caption)
+                    .lineLimit(2).frame(height: 30, alignment: .topLeading)
+                ProgressView(value: min(1, Double(following.level) * 5)).frame(width: 120)
                     .accessibilityLabel("Microphone level")
             }
             .foregroundStyle(following.status == .lost ? Color.white : Color.black)
-            .padding(.horizontal, 24).padding(.vertical, 12)
+            .frame(width: 280, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 10)
             .background(following.status == .lost ? Color.red : following.status == .following ? Color.mint.opacity(0.85) : Color.yellow,
                         in: RoundedRectangle(cornerRadius: 14))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .padding(.bottom, 18).allowsHitTesting(false)
+            // A separate top row keeps every state clear of the conducting path
+            // and the rest/entrance cues. Fixed dimensions prevent status changes
+            // from resizing the conducting surface during a phrase.
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.horizontal, 24).padding(.vertical, 8)
+            .allowsHitTesting(false)
             .accessibilityElement(children: .combine)
         }
     }

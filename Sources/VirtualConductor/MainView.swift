@@ -39,8 +39,10 @@ struct MainView: View {
         VStack(spacing: 0) {
             if !model.clean { header }
             ZStack(alignment: .bottomTrailing) {
-                ConductorSurface(model: model)
-                FollowingBanner(following: model.following)
+                VStack(spacing: 0) {
+                    FollowingBanner(following: model.following)
+                    ConductorSurface(model: model).frame(minHeight: 240)
+                }
                 if model.clean {
                     Button { model.clean = false } label: {
                         Text("H · Show controls").font(.caption).foregroundStyle(.white.opacity(0.50))
