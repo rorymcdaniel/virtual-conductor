@@ -19,7 +19,7 @@ Use **Load new exports…** to select a matching MIDI/WAV pair and optional matc
 
 Space plays/pauses, H shows/hides controls, and Right Arrow resumes from a configured cadenza wait. Text entry and modal utilities block performance shortcuts. The app remembers explicitly selected output and microphone devices without changing system defaults. If a selected device is unavailable, reconnect or choose another in the app. Recording uses a separate input engine without monitoring; microphone permission is requested when enabling input.
 
-Cadenza settings are stored in `~/Library/Application Support/VirtualConductor/cadenzas-v1.json`, keyed by exact MIDI SHA-256. Browser settings can be imported explicitly through the versioned JSON bridge. Changed MIDI does not inherit old boundaries.
+Cadenza settings are stored in `~/Library/Application Support/VirtualConductor/cadenzas-v1.json`, keyed by exact MIDI SHA-256. Browser settings can be imported explicitly through the versioned JSON bridge. Changed MIDI does not inherit old boundaries. Native cadenza boundaries accept subdivisions such as beat 1.5. The orchestra’s release can ring briefly after the boundary while the cadenza indicator waits for the pedal; see [cadenza handoff behavior](docs/cadenza-rubato-handoff.md).
 
 ## Recorded-performance timing
 
