@@ -61,7 +61,10 @@ pitched background sound can still be mistaken for the soloist.
 Live capture requests 256-frame taps instead of 1024. Hardware can choose its
 own delivery size. Queue overflow, batches older than the 250 ms processing
 budget, and late analysis results reset analysis/phrase timing rather than
-using old attacks to release a wait. Physical input/output device latency is
+using old attacks to release a wait. Confirmed sounding-pitch identity survives
+these resets, including on the tick that reaches a wait. Missing microphone
+delivery is detected by a greater-than-40 ms disagreement between accumulated
+sample time and the polling clock; analysis then rebases to the resumed batch. Physical input/output device latency is
 additional to the analysis window and is not measured by PCM replay.
 
 ## Acceptance checks
@@ -99,3 +102,18 @@ open-back headphone bleed, and perceived accompaniment response still need an
 instrument trial. Monophonic input, the supported score format, and a detectable
 articulation for repeated notes remain required. Ambiguous phrases, arbitrary
 score jumps, chords, and strong accompaniment leakage are not solved here.
+
+## Review and measured results
+
+The two-axis review found no documented standards violations or scope creep.
+It found two recovery defects in the initial change: forgotten held-note identity
+could release a wait after a discontinuity, and a capture gap could leave the
+sample clock permanently late. Both were reproduced with failing transport tests
+and corrected, including the transition tick entering a wait.
+
+The full warnings-as-errors suite passes with 116 tests and one opt-in hardware
+check skipped. The release beat/transport suite passes 25 tests. On this Mac,
+the first release measurement analyzed 8.3 seconds in 0.025 seconds, with a
+0.035 ms p99 processing time per 10 ms block. These are processing measurements,
+not end-to-end physical latency. The streamed entrance test bounds synthetic
+capture-to-release time to 65 ms.

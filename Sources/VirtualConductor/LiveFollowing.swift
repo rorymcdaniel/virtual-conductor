@@ -55,6 +55,7 @@ extension InputCapture: FollowingInput {}
     private var droppedSamples = 0
     private var analyzer: SoloAudioAnalyzer?
     private var analysisOrigin: Double?
+    private var analysisSamples = 0
     private var analyzing = false
     private var generation: UInt64 = 0
     var completed: (() -> Void)?
@@ -105,7 +106,7 @@ extension InputCapture: FollowingInput {}
 
     func stop() {
         generation &+= 1; capture.release(); active = false; analyzing = false
-        analyzer = nil; analysisOrigin = nil
+        analyzer = nil; analysisOrigin = nil; analysisSamples = 0
         level = 0; lastPitch = nil; lastObservation = 0
         if let audio { audio.stop(); audio.setRate(1) }
         self.audio = nil; buffers = [:]; boundaries = []; queuedEnd = nil
@@ -247,6 +248,13 @@ extension InputCapture: FollowingInput {}
         } catch { fail(error) }
     }
 
+    private func resetAnalysis() {
+        analyzer = nil; analysisOrigin = nil; analysisSamples = 0; status = .lost
+        // Keep sounding identity even immediately before a wait boundary:
+        // discarding timing must never turn a held note into a new attack.
+        if let plan { tracker.reset(notes: plan.notes, quarter: quarter(position), preservingSound: true) }
+    }
+
     private func poll(now: Double) {
         guard let storage = capture.storage else { return }
         level = storage.peak.load(ordering: .relaxed)
@@ -256,15 +264,22 @@ extension InputCapture: FollowingInput {}
         // Discontinuities invalidate both the sample clock and phrase timing.
         // Never let stale audio release a wait or cue an orchestral return.
         if dropped != droppedSamples || Double(incoming.count) / capture.sampleRate > 0.25 {
-            droppedSamples = dropped; analyzer = nil; analysisOrigin = nil; status = .lost
-            if let plan { tracker.reset(notes: plan.notes, quarter: quarter(position)) }
+            droppedSamples = dropped; resetAnalysis()
             return
         }
         guard !incoming.isEmpty else { return }
+        if let origin = analysisOrigin {
+            let sampleEnd = origin + Double(analysisSamples + incoming.count) / capture.sampleRate
+            // A missing delivery must not leave every later observation behind
+            // the transport clock. Normal tap/UI scheduling jitter stays below
+            // this allowance; accumulated contiguous batches retain their clock.
+            if abs(now - sampleEnd) > 0.04 { resetAnalysis() }
+        }
         if analyzer == nil {
             analyzer = SoloAudioAnalyzer(sampleRate: capture.sampleRate)
             analysisOrigin = now - Double(incoming.count) / capture.sampleRate
         }
+        analysisSamples += incoming.count
         analyzing = true
         let processor = analyzer!, origin = analysisOrigin!, token = generation
         Task {
@@ -276,13 +291,12 @@ extension InputCapture: FollowingInput {}
             guard token == generation, active else { return }
             analyzing = false
             guard clock() - now < 0.25 else {
-                analyzer = nil; analysisOrigin = nil; status = .lost
-                if let plan { tracker.reset(notes: plan.notes, quarter: quarter(position)) }
+                resetAnalysis()
                 return
             }
             analyzer = updated
             // Preserve every 10 ms observation, including multiple attacks in a
-            // single tap delivery. UI scheduling never supplies musical timestamps.
+            // single tap delivery. Relative timing comes from samples, not UI polls.
             for observation in observations {
                 guard active else { break }
                 observe(pitch: observation.pitch, time: origin + observation.time,

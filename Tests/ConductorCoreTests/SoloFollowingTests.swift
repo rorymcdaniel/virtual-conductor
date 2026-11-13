@@ -228,6 +228,55 @@ final class SoloFollowingTests: XCTestCase {
 }
 
 @MainActor final class LiveFollowingTests: XCTestCase {
+    func testHeldPitchCannotReleaseWaitAfterStaleAudioIsDiscarded() async throws {
+        for discardOnBoundary in [false, true] {
+            let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
+            var now = 0.0
+            let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+            let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo,
+                                         waits: [WaitPoint(measure: 2, beat: 1)], cadenzas: [])
+            try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+            input.storage = CaptureStorage(rate: 8000, streaming: true)
+            following.observe(pitch: 60, time: 0.5); following.observe(pitch: 60, time: 0.53)
+            audio.sourcePosition = 2.5; now = 2.5
+            if !discardOnBoundary { following.tick() }
+            for i in 0..<2400 { input.storage?.stream?.write(Float(0.1 * sin(2 * .pi * 261.6256 * Double(i) / 8000))) }
+            now += 0.3; following.tick()
+            for block in 0..<10 {
+                for i in 0..<160 { input.storage?.stream?.write(Float(0.1 * sin(2 * .pi * 261.6256 * Double(block * 160 + i) / 8000))) }
+                now += 0.02; following.tick()
+                try await Task.sleep(for: .milliseconds(3))
+            }
+            XCTAssertEqual(audio.played.count, 1, "Continued held sound must not become a new entrance after a discontinuity")
+            following.observe(pitch: 60, time: now + 0.02, rearticulated: true)
+            XCTAssertEqual(audio.played.count, 2)
+            following.stop()
+        }
+    }
+
+    func testCaptureGapRebasesClockAndRecoversFreeFollowing() async throws {
+        let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
+        var now = 0.0
+        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [],
+                                     freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        input.storage = CaptureStorage(rate: 8000, streaming: true)
+        audio.sourcePosition = 0.5; now = 0.5; following.tick()
+        for pitch in [60, 62] {
+            if pitch == 62 { now += 0.8; following.tick() }
+            let hz = 440 * pow(2, Double(pitch - 69) / 12)
+            for block in 0..<12 {
+                for i in 0..<160 { input.storage?.stream?.write(Float(0.1 * sin(2 * .pi * hz * Double(block * 160 + i) / 8000))) }
+                now += 0.02; following.tick()
+                try await Task.sleep(for: .milliseconds(3))
+            }
+        }
+        following.tick()
+        XCTAssertEqual(following.status, .following, "Resumed fresh audio must not stay permanently stale")
+        following.stop()
+    }
+
     func testStreamedEntranceLatencyAndStaleBatchRejection() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         input.sampleRate = 48000
