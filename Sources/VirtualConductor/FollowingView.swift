@@ -23,10 +23,10 @@ struct FollowingView: View {
                 .font(.callout).foregroundStyle(.secondary)
             Picker("Solo staff", selection: $values.solo) {
                 Text("Choose solo staff").tag(Optional<MusicXMLStaffID>.none)
-                ForEach(model.longRestSetup.staves, id: \.id) { staff in Text(staff.displayName).tag(Optional(staff.id)) }
-            }.disabled(model.longRestSetup.staves.isEmpty)
-            if model.longRestSetup.staves.isEmpty {
-                Text(model.longRestSetup.availability.replacingOccurrences(of: "Long-rest cues", with: "Live following"))
+                ForEach(model.scorePreparation.staves, id: \.id) { staff in Text(staff.displayName).tag(Optional(staff.id)) }
+            }.disabled(model.scorePreparation.staves.isEmpty)
+            if let reason = model.scorePreparation.unavailableReason {
+                Text(reason)
                     .font(.callout).foregroundStyle(.orange)
             }
             Picker("Microphone", selection: $inputID) {
@@ -90,7 +90,7 @@ struct FollowingView: View {
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: 620)
-            .onAppear { values = model.following.configuration; tolerance = model.following.tolerance; inputID = model.following.inputID }
+            .onAppear { values = model.scorePreparation.following; tolerance = model.following.tolerance; inputID = model.following.inputID }
     }
     private var freeEditor: some View {
         VStack(alignment: .leading, spacing: 10) {

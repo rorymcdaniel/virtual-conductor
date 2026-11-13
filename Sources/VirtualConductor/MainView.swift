@@ -137,12 +137,12 @@ struct MainView: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 18) {
-                    Picker("Solo staff", selection: Binding(get: { model.longRestSetup.selectedStaffID }, set: { model.selectLongRestStaff($0) })) {
+                    Picker("Solo staff", selection: Binding(get: { model.scorePreparation.selectedStaffID }, set: { model.selectSoloStaff($0) })) {
                         Text("Choose solo staff").tag(Optional<MusicXMLStaffID>.none)
-                        ForEach(model.longRestSetup.staves, id: \.id) { staff in
+                        ForEach(model.scorePreparation.staves, id: \.id) { staff in
                             Text(staff.displayName).tag(Optional(staff.id))
                         }
-                    }.frame(maxWidth: 380).disabled(model.longRestSetup.staves.isEmpty || model.locked)
+                    }.frame(maxWidth: 380).disabled(model.scorePreparation.staves.isEmpty || model.locked)
                     Stepper(value: Binding(get: { model.longRestSetup.threshold }, set: { model.setLongRestThreshold($0) }), in: 1...Int.max) {
                         Text("Long rest: at least \(model.longRestSetup.threshold) full measures").monospacedDigit()
                     }.fixedSize().disabled(model.locked)
@@ -151,7 +151,7 @@ struct MainView: View {
                 HStack {
                     Text(model.longRestSetup.availability).font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Button(model.following.configuration.enabled ? "Live following: on…" : "Live following…") {
+                    Button(model.scorePreparation.following.enabled ? "Live following: on…" : "Live following…") {
                         model.followingOpen = true
                     }.disabled(!editable || model.state == .waiting)
                 }

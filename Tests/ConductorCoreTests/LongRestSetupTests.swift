@@ -1,5 +1,6 @@
 import XCTest
 import AVFoundation
+import CryptoKit
 import ConductorCore
 @testable import VirtualConductor
 
@@ -30,10 +31,10 @@ final class LongRestSetupTests: XCTestCase {
         track += vlq(Int(end * 480) - tick) + [255,47,0]
         return Data(Array("MThd".utf8) + integer(6,4) + [0,0,0,1,1,224] + Array("MTrk".utf8) + integer(track.count,4) + track)
     }
-    private func loaded(_ name: String = "long-rest-eight-measures", identity: URL = URL(fileURLWithPath: "/score.mscz"), kept: Bool = false) throws -> LongRestSetup.Loaded {
+    private func loaded(_ name: String = "long-rest-eight-measures", identity: URL = URL(fileURLWithPath: "/score.mscz"), kept: Bool = false) throws -> ScorePreparation.Loaded {
         let url = fixture(name), score = try MusicXMLScore(data: Data(contentsOf: url))
         let midi = try MIDIFile(data: midiData(attacks: score.staves.flatMap(\.soundingIntervals).map(\.startQuarter), end: score.endQuarter))
-        return LongRestSetup.Loaded(musicXML: url, identity: identity, midi: midi, keptTiming: kept)
+        return ScorePreparation.Loaded(musicXML: url, identity: identity, midi: midi, midiFingerprint: "test", keptTiming: kept)
     }
     func testOrdinaryGraceNoteDoesNotHideSoloStaff() throws {
         let original = try String(contentsOf: fixture("long-rest-eight-measures"), encoding: .utf8)
@@ -43,7 +44,7 @@ final class LongRestSetupTests: XCTestCase {
         try Data(xml.utf8).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
         let midi = try MIDIFile(data: midiData(attacks: [34.5], end: 36))
-        let result = LongRestSetup.Loaded(musicXML: url, identity: url, midi: midi)
+        let result = ScorePreparation.Loaded(musicXML: url, identity: url, midi: midi, midiFingerprint: "test")
         let score = try XCTUnwrap(result.score, result.unavailable ?? "")
         XCTAssertEqual(score.staves.first?.notes.map(\.startQuarter), [34.5])
     }
@@ -64,7 +65,7 @@ final class LongRestSetupTests: XCTestCase {
         let attacks = [0.875, 1, 1.125, 2, 2.25, 2.5]
         func validate(_ pitches: [UInt8]) throws {
             let midi = try MIDIFile(data: midiData(attacks: attacks, end: 4, pitches: pitches))
-            try LongRestSetup.Loaded.validateMapping(score: score, midi: midi)
+            try ScorePreparation.Loaded.validateMapping(score: score, midi: midi)
         }
         XCTAssertNoThrow(try validate([60, 60, 60, 65, 65, 69]))
         XCTAssertThrowsError(try validate([61, 60, 60, 65, 65, 69]))
@@ -84,33 +85,34 @@ final class LongRestSetupTests: XCTestCase {
         XCTAssertEqual(score.staves[0].notes, [MIDINote(pitch: 47, startQuarter: 0, endQuarter: 8)])
     }
     func testStaffAndThresholdRebuildOnlySelectedSchedule() throws {
-        var setup = LongRestSetup()
-        let token = setup.beginLoading(); setup.finishLoading(try loaded("long-rest-voices-and-staves"), generation: token)
-        XCTAssertNil(setup.selectedStaffID)
-        XCTAssertGreaterThan(setup.staves.count, 1)
-        let first = setup.staves[0].id, second = setup.staves[1].id
-        setup.selectStaff(first); XCTAssertEqual(setup.schedule?.staffID, first)
-        setup.selectStaff(second); XCTAssertEqual(setup.schedule?.staffID, second)
-        setup.setThreshold(1); XCTAssertEqual(setup.schedule?.threshold, 1)
-        setup.setThreshold(0); XCTAssertEqual(setup.threshold, 1)
-        setup.setThreshold(-4); XCTAssertEqual(setup.threshold, 1)
-        setup.selectStaff(MusicXMLStaffID(partID: "missing", staffNumber: 1)); XCTAssertNil(setup.schedule)
+        var score = ScorePreparation(), rests = LongRestSetup()
+        let token = score.beginLoading(); score.finishLoading(try loaded("long-rest-voices-and-staves"), generation: token)
+        XCTAssertNil(score.selectedStaffID)
+        XCTAssertGreaterThan(score.staves.count, 1)
+        let first = score.staves[0].id, second = score.staves[1].id
+        score.selectStaff(first); rests.update(from: score); XCTAssertEqual(rests.schedule?.staffID, first)
+        score.selectStaff(second); rests.update(from: score); XCTAssertEqual(rests.schedule?.staffID, second)
+        rests.setThreshold(1, preparation: score); XCTAssertEqual(rests.schedule?.threshold, 1)
+        rests.setThreshold(0, preparation: score); XCTAssertEqual(rests.threshold, 1)
+        rests.setThreshold(-4, preparation: score); XCTAssertEqual(rests.threshold, 1)
+        score.selectStaff(MusicXMLStaffID(partID: "missing", staffNumber: 1)); rests.update(from: score)
+        XCTAssertNil(score.selectedStaffID); XCTAssertNil(rests.schedule)
     }
     func testEightMeasureThresholdBoundaryAndNoAutomaticSelection() throws {
-        var setup = LongRestSetup()
-        let token = setup.beginLoading(); setup.finishLoading(try loaded(), generation: token)
-        XCTAssertNil(setup.schedule)
-        setup.selectStaff(setup.staves[0].id)
-        XCTAssertEqual(setup.schedule?.runs.first?.fullMeasureCount, 8)
-        setup.setThreshold(9); XCTAssertTrue(setup.schedule!.runs.isEmpty)
-        setup.setThreshold(8); XCTAssertEqual(setup.schedule?.runs.count, 1)
+        var score = ScorePreparation(), rests = LongRestSetup()
+        let token = score.beginLoading(); score.finishLoading(try loaded(), generation: token)
+        XCTAssertNil(score.selectedStaffID)
+        score.selectStaff(score.staves[0].id); rests.update(from: score)
+        XCTAssertEqual(rests.schedule?.runs.first?.fullMeasureCount, 8)
+        rests.setThreshold(9, preparation: score); XCTAssertTrue(rests.schedule!.runs.isEmpty)
+        rests.setThreshold(8, preparation: score); XCTAssertEqual(rests.schedule?.runs.count, 1)
     }
     func testReplacementClearsSameStaffIDAndStaleResultsCannotRestoreIt() throws {
-        var setup = LongRestSetup()
+        var setup = ScorePreparation()
         let first = setup.beginLoading(); setup.finishLoading(try loaded(), generation: first)
         setup.selectStaff(setup.staves[0].id)
         let stale = setup.beginLoading(), current = setup.beginLoading()
-        XCTAssertNil(setup.schedule)
+        XCTAssertNil(setup.score); XCTAssertNil(setup.selectedStaffID)
         setup.finishLoading(try loaded(identity: URL(fileURLWithPath: "/other.mscz")), generation: current)
         XCTAssertNil(setup.selectedStaffID)
         setup.finishLoading(try loaded(), generation: stale)
@@ -118,25 +120,25 @@ final class LongRestSetupTests: XCTestCase {
         setup.failLoading(generation: stale); XCTAssertFalse(setup.staves.isEmpty)
     }
     func testRereadAndKeptTimingRetainSelectionButBarePairClearsIt() throws {
-        var setup = LongRestSetup()
+        var setup = ScorePreparation()
         let first = setup.beginLoading(); setup.finishLoading(try loaded(), generation: first)
-        let id = setup.staves[0].id; setup.selectStaff(id); setup.setThreshold(3)
+        let id = setup.staves[0].id; setup.selectStaff(id)
         let reread = setup.beginLoading(); setup.finishLoading(try loaded(), generation: reread)
         XCTAssertEqual(setup.selectedStaffID, id)
         let keep = setup.beginLoading(); setup.finishLoading(try loaded(kept: true), generation: keep)
-        XCTAssertEqual(setup.selectedStaffID, id); XCTAssertEqual(setup.threshold, 3)
+        XCTAssertEqual(setup.selectedStaffID, id)
         let midi = try MIDIFile(data: midiData(attacks: [34.5], end: 36))
-        let bare = setup.beginLoading(); setup.finishLoading(.init(musicXML: nil, identity: nil, midi: midi), generation: bare)
-        XCTAssertNil(setup.schedule); XCTAssertTrue(setup.staves.isEmpty)
-        XCTAssertTrue(setup.availability.contains("matching MuseScore MusicXML"))
+        let bare = setup.beginLoading(); setup.finishLoading(.init(musicXML: nil, identity: nil, midi: midi, midiFingerprint: "test"), generation: bare)
+        XCTAssertNil(setup.selectedStaffID); XCTAssertTrue(setup.staves.isEmpty)
+        XCTAssertTrue(setup.unavailableReason?.contains("matching MuseScore MusicXML") == true)
     }
     func testMappingRejectsLengthAndAttackMismatchAndAllowsTempoChanges() throws {
         let score = try MusicXMLScore(data: Data(contentsOf: fixture("long-rest-eight-measures")))
-        XCTAssertThrowsError(try LongRestSetup.Loaded.validateMapping(score: score, midi: MIDIFile(data: midiData(attacks: [34.5], end: 40))))
-        XCTAssertThrowsError(try LongRestSetup.Loaded.validateMapping(score: score, midi: MIDIFile(data: midiData(attacks: [33.5], end: 36))))
-        XCTAssertNoThrow(try LongRestSetup.Loaded.validateMapping(score: score, midi: MIDIFile(data: midiData(attacks: [34.5], end: 36, tempo: 750_000))))
-        XCTAssertNoThrow(try LongRestSetup.Loaded.validateMapping(score: score, midi: MIDIFile(data: midiData(attacks: [34.5], end: 35.95))))
-        XCTAssertThrowsError(try LongRestSetup.Loaded.validateMapping(score: score, midi: MIDIFile(data: midiData(attacks: [30.5], end: 32))))
+        XCTAssertThrowsError(try ScorePreparation.Loaded.validateMapping(score: score, midi: MIDIFile(data: midiData(attacks: [34.5], end: 40))))
+        XCTAssertThrowsError(try ScorePreparation.Loaded.validateMapping(score: score, midi: MIDIFile(data: midiData(attacks: [33.5], end: 36))))
+        XCTAssertNoThrow(try ScorePreparation.Loaded.validateMapping(score: score, midi: MIDIFile(data: midiData(attacks: [34.5], end: 36, tempo: 750_000))))
+        XCTAssertNoThrow(try ScorePreparation.Loaded.validateMapping(score: score, midi: MIDIFile(data: midiData(attacks: [34.5], end: 35.95))))
+        XCTAssertThrowsError(try ScorePreparation.Loaded.validateMapping(score: score, midi: MIDIFile(data: midiData(attacks: [30.5], end: 32))))
     }
     func testSustainingAccompanimentCannotSubstituteForMissingSoloAttack() throws {
         let original = try String(contentsOf: fixture("long-rest-eight-measures"), encoding: .utf8)
@@ -145,9 +147,9 @@ final class LongRestSetupTests: XCTestCase {
         let score = try MusicXMLScore(data: Data(xml.utf8))
         // The accompaniment begins at 34 and spans the solo's missing 34.5 attack.
         let missing = try MIDIFile(data: midiData(attacks: [34], end: 36, noteTicks: 480))
-        XCTAssertThrowsError(try LongRestSetup.Loaded.validateMapping(score: score, midi: missing))
+        XCTAssertThrowsError(try ScorePreparation.Loaded.validateMapping(score: score, midi: missing))
         let matching = try MIDIFile(data: midiData(attacks: [34, 34.5], end: 36, noteTicks: 480))
-        XCTAssertNoThrow(try LongRestSetup.Loaded.validateMapping(score: score, midi: matching))
+        XCTAssertNoThrow(try ScorePreparation.Loaded.validateMapping(score: score, midi: matching))
     }
 
     func testChangedScoreAtSamePathClearsSelectionButKeptTempoRefreshPreservesIt() throws {
@@ -158,25 +160,106 @@ final class LongRestSetupTests: XCTestCase {
         let original = try String(contentsOf: fixture("long-rest-eight-measures"), encoding: .utf8)
         try original.write(to: xml, atomically: true, encoding: .utf8)
         let midi = try MIDIFile(data: midiData(attacks: [34.5], end: 36))
-        var setup = LongRestSetup()
+        var setup = ScorePreparation()
         let first = setup.beginLoading()
-        setup.finishLoading(.init(musicXML: xml, identity: xml, midi: midi), generation: first)
+        setup.finishLoading(.init(musicXML: xml, identity: xml, midi: midi, midiFingerprint: "test"), generation: first)
         let id = setup.staves[0].id; setup.selectStaff(id)
         let tempo = original.replacingOccurrences(of: "<measure number=\"2\">", with: "<measure number=\"2\"><direction><sound tempo=\"80\"/></direction>")
         try tempo.write(to: xml, atomically: true, encoding: .utf8)
         let keep = setup.beginLoading()
-        setup.finishLoading(.init(musicXML: xml, identity: xml, midi: midi, keptTiming: true), generation: keep)
+        setup.finishLoading(.init(musicXML: xml, identity: xml, midi: midi, midiFingerprint: "test", keptTiming: true), generation: keep)
         XCTAssertEqual(setup.selectedStaffID, id)
         try tempo.replacingOccurrences(of: "<step>C</step>", with: "<step>D</step>").write(to: xml, atomically: true, encoding: .utf8)
         let replacement = setup.beginLoading()
-        setup.finishLoading(.init(musicXML: xml, identity: xml, midi: midi), generation: replacement)
+        setup.finishLoading(.init(musicXML: xml, identity: xml, midi: midi, midiFingerprint: "test"), generation: replacement)
         XCTAssertNil(setup.selectedStaffID)
     }
 
     func testUnsupportedScoreIsNonfatalAndExplainsUnavailableCues() throws {
         let midi = try MIDIFile(data: midiData(attacks: [0], end: 4))
-        let loaded = LongRestSetup.Loaded(musicXML: fixture("musicxml-pickup"), identity: nil, midi: midi)
+        let loaded = ScorePreparation.Loaded(musicXML: fixture("musicxml-pickup"), identity: nil, midi: midi, midiFingerprint: "test")
         XCTAssertNil(loaded.score); XCTAssertTrue(loaded.unavailable!.contains("Pickup"))
+    }
+
+    private func silentWAV(at url: URL, seconds: Int) throws {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(seconds * 8000))!
+        buffer.frameLength = buffer.frameCapacity
+        buffer.floatChannelData![0].initialize(repeating: 0, count: Int(buffer.frameLength))
+        try AVAudioFile(forWriting: url, settings: format.settings).write(from: buffer)
+    }
+
+    @MainActor func testLegacySettingsAndBothStaffPickersDriveTheSameScore() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let suite = "ScorePreparationTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let midi = directory.appendingPathComponent("score.mid"), wav = directory.appendingPathComponent("score.wav")
+        let xml = fixture("musicxml-multi-staff")
+        let data = midiData(attacks: [0, 0.5, 1, 4], end: 8)
+        try data.write(to: midi)
+        try silentWAV(at: wav, seconds: 4)
+        func fingerprint(_ data: Data) -> String {
+            SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        }
+        let key = try "following-v1-" + fingerprint(data) + "-" + fingerprint(Data(contentsOf: xml))
+        // Existing flat JSON, from before free passages were introduced.
+        let legacy = #"{"enabled":true,"solo":{"partID":"Piano","staffNumber":2},"waits":[{"measure":1,"beat":1.5}]}"#
+        defaults.set(Data(legacy.utf8), forKey: key)
+        let model = PerformanceModel(followingDefaults: defaults)
+        model.outputMissing = true
+        model.load(midi: midi, wav: wav, musicXML: xml)
+        while model.state == .loading { await Task.yield() }
+        XCTAssertEqual(model.state, .ready)
+        let saved = MusicXMLStaffID(partID: "Piano", staffNumber: 2)
+        let other = MusicXMLStaffID(partID: "Other", staffNumber: 1)
+        XCTAssertTrue(model.scorePreparation.following.enabled)
+        XCTAssertEqual(model.longRestSetup.schedule?.staffID, saved)
+        XCTAssertEqual(try model.followingPlan().waits, [0.5])
+        XCTAssertEqual(try model.followingPlan().notes.map(\.pitch), [48])
+
+        var draft = model.scorePreparation.following
+        draft.solo = other
+        draft.waits = [WaitPoint(measure: 2, beat: 1)]
+        XCTAssertThrowsError(try model.saveFollowing(draft, tolerance: .nan))
+        XCTAssertEqual(model.longRestSetup.schedule?.staffID, saved)
+        try model.saveFollowing(draft, tolerance: 15)
+        XCTAssertEqual(model.longRestSetup.schedule?.staffID, other)
+        XCTAssertEqual(try model.followingPlan().waits, [4])
+        XCTAssertEqual(try model.followingPlan().notes.map(\.pitch), [74])
+        let stored = try JSONDecoder().decode(FollowingConfiguration.self, from: XCTUnwrap(defaults.data(forKey: key)))
+        XCTAssertEqual(stored.solo, other)
+        XCTAssertEqual(stored.waits, draft.waits)
+
+        model.selectSoloStaff(saved)
+        XCTAssertEqual(model.longRestSetup.schedule?.staffID, saved)
+        XCTAssertThrowsError(try model.followingPlan()) // The old wait is not an attack on this staff.
+        model.reload()
+        while model.state == .loading { await Task.yield() }
+        XCTAssertEqual(model.longRestSetup.schedule?.staffID, saved) // A reread keeps the current choice.
+
+        let replacement = directory.appendingPathComponent("replacement.musicxml")
+        try (String(contentsOf: xml, encoding: .utf8) + "\n<!-- new export -->").write(to: replacement, atomically: true, encoding: .utf8)
+        model.load(midi: midi, wav: wav, musicXML: replacement)
+        while model.state == .loading { await Task.yield() }
+        XCTAssertNil(model.scorePreparation.selectedStaffID)
+        XCTAssertNil(model.longRestSetup.schedule)
+        XCTAssertFalse(model.scorePreparation.following.enabled)
+        XCTAssertTrue(model.scorePreparation.following.waits.isEmpty)
+        XCTAssertEqual(model.following.tolerance, 15)
+
+        try midiData(attacks: [0, 1, 4], end: 8).write(to: midi)
+        model.load(midi: midi, wav: wav, musicXML: xml)
+        while model.state == .loading { await Task.yield() }
+        XCTAssertEqual(model.state, .ready)
+        XCTAssertNotNil(model.prepared)
+        XCTAssertNil(model.longRestSetup.schedule)
+        XCTAssertTrue(model.longRestSetup.availability.contains("matching linear timeline"))
+        XCTAssertThrowsError(try model.followingPlan()) { error in
+            XCTAssertTrue(error.localizedDescription.contains("matching linear timeline"))
+        }
     }
 
     @MainActor func testModelLoadsSidecarAndKeepRefreshThenBarePairClearsCues() async throws {
@@ -185,24 +268,45 @@ final class LongRestSetupTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let midi = directory.appendingPathComponent("score.mid"), wav = directory.appendingPathComponent("score.wav")
         try midiData(attacks: [34.5], end: 36).write(to: midi)
-        let format = AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1)!
-        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 144000)!
-        buffer.frameLength = buffer.frameCapacity
-        try AVAudioFile(forWriting: wav, settings: format.settings).write(from: buffer)
-        let model = PerformanceModel(); model.outputMissing = true
-        model.load(midi: midi, wav: wav, musicXML: fixture("long-rest-eight-measures"), scoreIdentity: directory)
+        try silentWAV(at: wav, seconds: 28)
+        let suite = "ScorePreparationTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = PerformanceModel(followingDefaults: defaults); model.outputMissing = true
+        let xml = fixture("long-rest-eight-measures")
+        model.load(midi: midi, wav: wav, musicXML: xml, scoreIdentity: directory)
         while model.state == .loading { await Task.yield() }
         XCTAssertEqual(model.state, .ready)
-        let id = try XCTUnwrap(model.longRestSetup.staves.first?.id)
-        model.selectLongRestStaff(id)
-        model.recording.onKeep?(RehearsalFiles(score: directory, midi: midi, wav: wav, musicXML: fixture("long-rest-eight-measures")))
+        let id = try XCTUnwrap(model.scorePreparation.staves.first?.id)
+        var draft = model.scorePreparation.following
+        draft.solo = id; draft.enabled = true
+        draft.waits = [WaitPoint(measure: 9, beat: 3.5)]
+        try model.saveFollowing(draft, tolerance: 10)
+        let take = RecordedTake(samples: [0, 0.5], sampleRate: 2, range: PassageRange(start: 32, end: 36))
+        model.recording.take = take
+        let keptMIDI = directory.appendingPathComponent("kept.mid"), keptXML = directory.appendingPathComponent("kept.musicxml")
+        try midiData(attacks: [34.5], end: 36, tempo: 750_000).write(to: keptMIDI)
+        let updated = try String(contentsOf: xml, encoding: .utf8)
+            .replacingOccurrences(of: "<measure number=\"2\">", with: "<measure number=\"2\"><direction><sound tempo=\"80\"/></direction>")
+        try updated.write(to: keptXML, atomically: true, encoding: .utf8)
+        model.recording.onKeep?(RehearsalFiles(score: directory, midi: keptMIDI, wav: wav, musicXML: keptXML))
         XCTAssertNil(model.longRestSetup.schedule)
         while model.state == .loading { await Task.yield() }
-        XCTAssertEqual(model.longRestSetup.selectedStaffID, id)
+        XCTAssertEqual(model.scorePreparation.selectedStaffID, id)
         XCTAssertEqual(model.longRestSetup.schedule?.runs.first?.cue?.quarter, 34)
+        XCTAssertEqual(try model.followingPlan().notes.first?.startQuarter, 34.5)
+        XCTAssertEqual(model.recording.take?.samples, take.samples)
+        XCTAssertEqual(model.prepared?.midi.openingBPM, 80)
+        XCTAssertFalse(model.scorePreparation.following.enabled)
+        XCTAssertTrue(model.scorePreparation.following.waits.isEmpty)
         model.load(midi: midi, wav: wav, musicXML: fixture("long-rest-eight-measures"), scoreIdentity: directory)
         model.load(midi: midi, wav: wav)
         while model.state == .loading { await Task.yield() }
         XCTAssertEqual(model.state, .ready); XCTAssertNil(model.longRestSetup.schedule)
+        XCTAssertNil(model.scorePreparation.selectedStaffID)
+        XCTAssertFalse(model.scorePreparation.following.enabled)
+        XCTAssertThrowsError(try model.followingPlan()) { error in
+            XCTAssertTrue(error.localizedDescription.contains("matching MuseScore MusicXML"))
+        }
     }
 }

@@ -32,11 +32,14 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
     @Published var passages: [CadenzaPassage] = []
     @Published var fingerprint = ""
     @Published var prepared: PreparedPerformance?
+    @Published private(set) var scorePreparation: ScorePreparation {
+        didSet { longRestSetup.update(from: scorePreparation) }
+    }
     @Published private(set) var longRestSetup = LongRestSetup()
     private var musicXMLURL: URL?
     private var scoreIdentity: URL?
     let audio = PerformanceAudio()
-    let following = LiveFollowing()
+    let following: LiveFollowing
     let museScore = MuseScoreLink()
     lazy var recording: RecordingModel = {
         let model = RecordingModel(audio: audio)
@@ -55,7 +58,9 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
     private var settings = CadenzaSettings()
     var locked: Bool { [.running,.starting,.loading].contains(state) }
     var shortcutsBlocked: Bool { utilityOpen || editorOpen || followingOpen || importOpen || filePanelOpen }
-    init() {
+    init(followingDefaults: UserDefaults = .standard) {
+        scorePreparation = ScorePreparation(defaults: followingDefaults)
+        following = LiveFollowing(defaults: followingDefaults)
         refreshDevices()
         outputID = AudioDevices.defaultID(input: false)
         following.completed = { [weak self] in
@@ -107,44 +112,41 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
     func load(midi: URL, wav: URL, musicXML: URL? = nil, scoreIdentity: URL? = nil, preservingTake: Bool = false, linked: Bool = false) {
         if !preservingTake && !linked { museScore.disconnect() }
         run &+= 1; let token = run
-        let cueToken = longRestSetup.beginLoading()
+        let scoreToken = scorePreparation.beginLoading()
         following.stop(); audio.stop(); recording.close(); state = .loading; message = "Reading exports and preparing audio…"
         Task {
             do {
-                let result = try await Task.detached(priority: .userInitiated) { () -> (MIDIFile,AVAudioPCMBuffer,String,LongRestSetup.Loaded) in
+                let result = try await Task.detached(priority: .userInitiated) {
                     let data = try Data(contentsOf: midi)
                     let parsed = try MIDIFile(data: data)
-                    return (parsed,try PreparedPerformance.load(wav), SHA256.hash(data:data).map { String(format:"%02x",$0) }.joined(), LongRestSetup.Loaded(musicXML: musicXML, identity: scoreIdentity ?? musicXML, midi: parsed, keptTiming: preservingTake))
+                    let fingerprint = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+                    let score = ScorePreparation.Loaded(musicXML: musicXML, identity: scoreIdentity, midi: parsed,
+                                                        midiFingerprint: fingerprint, keptTiming: preservingTake)
+                    return (midi: parsed, source: try PreparedPerformance.load(wav), fingerprint: fingerprint, score: score)
                 }.value
                 guard token == run else { return }
                 var saved: [CadenzaPassage] = []; var warning = ""
-                do { saved = preservingTake ? passages : try settings.load(fingerprint: result.2); _ = try compileCadenzas(saved,midi:result.0,audioDuration:Double(result.1.frameLength)/result.1.format.sampleRate) }
+                do { saved = preservingTake ? passages : try settings.load(fingerprint: result.fingerprint); _ = try compileCadenzas(saved,midi:result.midi,audioDuration:Double(result.source.frameLength)/result.source.format.sampleRate) }
                 catch { warning = " Saved settings could not load: \(error.localizedDescription)"; saved = [] }
                 let prep = preparation, values = saved
-                let new = try await Task.detached { try PreparedPerformance(midi:result.0,source:result.1,preparation:prep,passages:values) }.value
+                let new = try await Task.detached { try PreparedPerformance(midi:result.midi,source:result.source,preparation:prep,passages:values) }.value
                 guard token == run else { return }
-                longRestSetup.finishLoading(result.3, generation: cueToken)
-                let xmlHash = result.3.document.map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() } ?? "no-xml"
-                following.loadSettings(key: result.2 + "-" + xmlHash)
-                if let solo = following.configuration.solo { longRestSetup.selectStaff(solo) }
+                scorePreparation.finishLoading(result.score, generation: scoreToken)
                 self.musicXMLURL = musicXML; self.scoreIdentity = scoreIdentity
-                prepared = new; fingerprint = result.2; passages = saved; midiURL = midi; wavURL = wav
-                if preservingTake { recording.refreshLinkedScore(result.0, fingerprint: result.2); if utilityOpen { recording.open() } }
-                else { recording.setScore(result.0, fingerprint:result.2) }
+                prepared = new; fingerprint = result.fingerprint; passages = saved; midiURL = midi; wavURL = wav
+                if preservingTake { recording.refreshLinkedScore(result.midi, fingerprint: result.fingerprint); if utilityOpen { recording.open() } }
+                else { recording.setScore(result.midi, fingerprint:result.fingerprint) }
                 position = 0; segmentStart = 0; passageIndex = 0; state = .ready
                 if !outputMissing { chooseOutput() }
-                message = "\(result.0.measures) measures · opening ♩ = \(String(format:"%.1f",result.0.openingBPM)). Ready.\(warning)"
+                message = "\(result.midi.measures) measures · opening ♩ = \(String(format:"%.1f",result.midi.openingBPM)). Ready.\(warning)"
                 if new.duration + 0.1 < new.midi.duration { message += " Audio ends before MIDI; check the matching exports." }
                 importOpen = false
-            } catch { guard token == run else { return }; longRestSetup.failLoading(generation: cueToken); state = .error; message = "Could not load exports: \(error.localizedDescription)" }
+            } catch { guard token == run else { return }; scorePreparation.failLoading(generation: scoreToken); state = .error; message = "Could not load exports: \(error.localizedDescription)" }
         }
     }
     func reload() { if let midiURL, let wavURL { load(midi:midiURL,wav:wavURL,musicXML:musicXMLURL,scoreIdentity:scoreIdentity,linked:museScore.connected) } }
-    func selectLongRestStaff(_ id: MusicXMLStaffID?) {
-        longRestSetup.selectStaff(id)
-        following.configuration.solo = id
-    }
-    func setLongRestThreshold(_ value: Int) { longRestSetup.setThreshold(value) }
+    func selectSoloStaff(_ id: MusicXMLStaffID?) { scorePreparation.selectStaff(id) }
+    func setLongRestThreshold(_ value: Int) { longRestSetup.setThreshold(value, preparation: scorePreparation) }
     func reset() {
         run &+= 1; following.stop(); audio.stop(); audio.setRate(1); position = 0; segmentStart = 0; passageIndex = 0
         state = prepared == nil ? .empty : .ready
@@ -183,7 +185,7 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         if state == .running { pause(); return }
         guard let prepared, [.ready,.paused,.finished].contains(state) else { return }
         if state == .finished { reset() }
-        if following.configuration.enabled { startFollowing(prepared); return }
+        if scorePreparation.following.enabled { startFollowing(prepared); return }
         let start = position, index = passageIndex
         let end = prepared.segments[index].end
         run &+= 1; let token = run; state = .starting
@@ -228,9 +230,10 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         audio.stop(); utilityOpen = true; recording.open()
     }
     func closeRecording() { recording.close(); utilityOpen = false }
-    func followingPlan(configuration: FollowingConfiguration) throws -> FollowingPlan {
-        guard let score = longRestSetup.score else {
-            throw MusicalError(longRestSetup.availability.replacingOccurrences(of: "Long-rest cues", with: "Live following"))
+    func followingPlan(configuration draft: FollowingConfiguration? = nil) throws -> FollowingPlan {
+        let configuration = draft ?? scorePreparation.following
+        guard let score = scorePreparation.score else {
+            throw MusicalError(scorePreparation.unavailableReason ?? "Choose matching MusicXML for live following.")
         }
         guard let solo = configuration.solo, let prepared else {
             throw MusicalError("Load matching MusicXML and choose your solo staff before enabling live following.")
@@ -239,12 +242,14 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
     }
     func saveFollowing(_ values: FollowingConfiguration, tolerance: Double) throws {
         if values.enabled || !values.waits.isEmpty || !values.freePassages.isEmpty { _ = try followingPlan(configuration: values) }
-        try following.save(values, tolerance: tolerance)
-        longRestSetup.selectStaff(values.solo); followingOpen = false; reset()
+        guard tolerance.isFinite, (0...75).contains(tolerance) else { throw MusicalError("Choose a tempo tolerance from 0–75%.") }
+        try scorePreparation.saveFollowing(values)
+        following.tolerance = tolerance
+        followingOpen = false; reset()
     }
     private func startFollowing(_ prepared: PreparedPerformance) {
         do {
-            let plan = try followingPlan(configuration: following.configuration)
+            let plan = try followingPlan()
             run &+= 1; let token = run; let start = position
             state = .starting; message = "Preparing live following and microphone…"
             Task {
