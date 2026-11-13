@@ -23,9 +23,9 @@ enum FollowingFixture {
         return try MusicXMLScore(data: Data("<score-partwise><part-list><score-part id=\"S\"><part-name>Solo</part-name></score-part><score-part id=\"O\"><part-name>Orchestra</part-name></score-part></part-list><part id=\"S\">\(solo)</part><part id=\"O\">\(orchestra)</part></score-partwise>".utf8))
     }
     static var solo: MusicXMLStaffID { MusicXMLStaffID(partID: "S", staffNumber: 1) }
-    static func midi() throws -> MIDIFile {
+    static func midi(quarters: Int = 16) throws -> MIDIFile {
         var track: [UInt8] = []
-        for _ in 0..<16 { track += [0, 0x90, 60, 90, 0x83, 0x60, 0x80, 60, 0] }
+        for _ in 0..<quarters { track += [0, 0x90, 60, 90, 0x83, 0x60, 0x80, 60, 0] }
         track += [0, 0xff, 0x2f, 0]
         let n = track.count
         return try MIDIFile(data: Data(Array("MThd".utf8) + [0,0,0,6,0,0,0,1,1,0xe0] + Array("MTrk".utf8) + [0,0,UInt8(n >> 8),UInt8(n & 255)] + track))

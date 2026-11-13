@@ -30,7 +30,10 @@ The private rehearsal report and its audio remain on the owner's Mac.
 
 ## Implementation and verification
 
-Accompanied matches must be near the sounding accompaniment. Doubtful matches
+Accompanied reacquisition stays near the sounding accompaniment. Plausible
+immediate-next-note evidence remains available outside that window so a slow or
+fast long-note phrase can establish its tempo before playback has caught up.
+Doubtful matches
 may recover a nearby earlier position instead of locking the search ahead.
 Skipped/backwards matches begin a new timing phrase; rejected pitches contribute
 no timing evidence. Tempo and position correction require at least three ordered

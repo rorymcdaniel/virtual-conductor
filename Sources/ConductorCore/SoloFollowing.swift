@@ -157,6 +157,7 @@ public struct SoloTracker: Codable, Sendable {
             return nil
         }
         guard attack else { return nil }
+        let onset = repeatedAccent ? time : candidateSince
         let next = max(searchStart, (index ?? (searchStart - 1)) + 1)
         let lower = !free && !hasReliableTempo ? searchStart : next
         var candidates = Array(next..<min(notes.count, next + (free ? 3 : 8)))
@@ -170,6 +171,13 @@ public struct SoloTracker: Codable, Sendable {
             let latest = midi.quarter(atSeconds: expectedTime + window)
             candidates = notes.indices.filter {
                 $0 >= lower && notes[$0].startQuarter >= earliest && notes[$0].startQuarter <= latest
+            }
+            // A real long-note phrase can drift beyond that window before its
+            // third attack confirms a pace. Preserve immediate sequential
+            // evidence, while distant pitch-only jumps still need reacquisition.
+            if let index, next == index + 1, next < notes.count, onset > lastAttack {
+                let interval = midi.seconds(atQuarter: notes[next].startQuarter) - midi.seconds(atQuarter: notes[index].startQuarter)
+                if (0.1...4).contains(interval / (onset - lastAttack)) { candidates.append(next) }
             }
         }
         if repeatedAccent, let index, notes[index].pitch == pitch { candidates = candidates.filter { $0 == next } }
@@ -186,7 +194,6 @@ public struct SoloTracker: Codable, Sendable {
         // Start a new phrase after a skipped or backwards match; retain its last
         // trusted pace until subsequent attacks corroborate the new position.
         if !free, let index, match != index + 1 { anchors = []; tempoConfirmed = false }
-        let onset = repeatedAccent ? time : candidateSince
         let scoreTime = midi.seconds(atQuarter: notes[match].startQuarter)
         // Estimate pace over a short phrase. A frame of onset jitter on a single
         // triplet should not drive the accompaniment all the way to its tempo limit.

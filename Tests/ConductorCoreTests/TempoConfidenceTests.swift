@@ -60,18 +60,32 @@ final class TempoConfidenceTests: XCTestCase {
         XCTAssertTrue(tracker.hasReliableTempo)
     }
 
-    func testLongNotesCanEstablishTempo() throws {
-        let midi = try FollowingFixture.midi()
-        let longNotes = [60,62,64,65].enumerated().map { MIDINote(pitch: $1, startQuarter: Double($0)*4, endQuarter: Double($0+1)*4) }
-        var tracker = SoloTracker()
-        for note in longNotes {
-            for offset in [0.0, 0.02] {
-                tracker.observe(pitch: note.pitch, time: note.startQuarter*0.5/0.9+offset, notes: longNotes,
-                                expectedQuarter: note.startQuarter, free: false, midi: midi)
+    func testLongNoteTempoChangesAreLearnedAgainstTheMovingAccompaniment() throws {
+        let midi = try FollowingFixture.midi(quarters: 32)
+        for spacing in [2.0, 4.0] {
+            for pace in [0.82, 0.9, 1.18] {
+                let notes = (0..<8).map { MIDINote(pitch: 60+$0, startQuarter: Double($0)*spacing, endQuarter: Double($0+1)*spacing) }
+                var tracker = SoloTracker(), tempo = FollowingTempo(), position = 0.0, matched: [Int] = []
+                let duration = midi.seconds(atQuarter: notes.last!.startQuarter)/pace + 0.8
+                for frame in 0...Int(duration*100) {
+                    let time = Double(frame)*0.01
+                    if frame > 0 { position += 0.01*tempo.rate }
+                    let quarter = midi.quarter(atSeconds: position)
+                    let solo = min(notes.count-1, Int(time*pace/(spacing*0.5)))
+                    if let match = tracker.observe(pitch: notes[solo].pitch, time: time, notes: notes,
+                        expectedQuarter: quarter, free: false, midi: midi) { matched.append(match) }
+                    let error = tracker.index.map { i in
+                        min(midi.seconds(atQuarter: notes[i].endQuarter), midi.seconds(atQuarter: notes[i].startQuarter)+(time-tracker.lastAttack)*tracker.rate)-position
+                    } ?? 0
+                    _ = tempo.update(delta: 0.01, tolerance: 0.2, trackedRate: tracker.rate, phaseError: error,
+                                     age: time-tracker.lastMatch, reliable: tracker.hasReliableTempo)
+                }
+                XCTAssertEqual(matched, Array(notes.indices), "spacing \(spacing), pace \(pace)")
+                XCTAssertTrue(tracker.hasReliableTempo)
+                XCTAssertEqual(tracker.rate, pace, accuracy: 0.02)
+                XCTAssertEqual(tempo.rate, pace, accuracy: 0.04)
             }
         }
-        XCTAssertTrue(tracker.hasReliableTempo)
-        XCTAssertEqual(tracker.rate, 0.9, accuracy: 0.02)
     }
 
     func testRecoveryCanMoveBehindAnUnconfirmedMatch() throws {
