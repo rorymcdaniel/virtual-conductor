@@ -97,17 +97,6 @@ final class SoloFollowingTests: XCTestCase {
         }
     }
 
-    func testShortReturnConfirmationRequiresTheExpectedPitchInBothWindows() {
-        let rate = 12000.0
-        func signal(_ pitch: Int, _ count: Int) -> [Float] {
-            let hz = 440 * pow(2, Double(pitch - 69) / 12)
-            return (0..<count).map { Float(0.15 * sin(2 * .pi * hz * Double($0) / rate)) }
-        }
-        XCTAssertTrue(LivePitch.confirmsReturn(70, samples: signal(70, 540), sampleRate: rate))
-        XCTAssertFalse(LivePitch.confirmsReturn(70, samples: signal(58, 540), sampleRate: rate))
-        XCTAssertFalse(LivePitch.confirmsReturn(70, samples: signal(58, 420) + signal(70, 120), sampleRate: rate))
-    }
-
     func testTripletTempoUsesThePhraseDespiteFrameTimingJitter() throws {
         let midi = try FollowingFixture.midi(), pace = 0.94
         let notes = (0..<8).map { MIDINote(pitch: 60 + $0, startQuarter: Double($0)/3, endQuarter: Double($0+1)/3) }
@@ -239,6 +228,58 @@ final class SoloFollowingTests: XCTestCase {
 }
 
 @MainActor final class LiveFollowingTests: XCTestCase {
+    func testStreamedEntranceLatencyAndStaleBatchRejection() async throws {
+        let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
+        input.sampleRate = 48000
+        var now = 0.0
+        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo,
+                                     waits: [WaitPoint(measure: 1, beat: 1)], cadenzas: [])
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        input.storage = CaptureStorage(rate: 48000, streaming: true)
+        audio.sourcePosition = 0.5; now = 0.5; following.tick()
+        func writeTone(_ count: Int) {
+            for i in 0..<count { input.storage?.stream?.write(Float(0.1 * sin(2 * .pi * 261.6256 * Double(i) / 48000))) }
+        }
+        writeTone(14400); now += 0.3; following.tick()
+        try await Task.sleep(for: .milliseconds(10))
+        XCTAssertEqual(audio.played.count, 1, "A stale 300 ms batch cannot release the wait")
+        let onset = now
+        for block in 0..<16 {
+            for i in 0..<256 {
+                let t = Double(block * 256 + i) / 48000
+                input.storage?.stream?.write(Float(0.1 * sin(2 * .pi * 261.6256 * t)))
+            }
+            now += 256.0 / 48000; following.tick()
+            try await Task.sleep(for: .milliseconds(3))
+            if audio.played.count == 2 { break }
+        }
+        XCTAssertEqual(audio.played.count, 2)
+        XCTAssertLessThanOrEqual(now - onset, 0.065, "Synthetic capture-to-release latency must stay under 65 ms")
+        following.stop()
+    }
+
+    func testFastPhraseSurvivesMicrophoneDeliveryInLargeBatches() async throws {
+        let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
+        var now = 0.0
+        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [],
+                                     freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        input.storage = CaptureStorage(rate: 8000, streaming: true)
+        audio.sourcePosition = 0.5; now = 0.5; following.tick()
+        let samples = BeatDetectionFixture.signal(pitches: [60,62,64,65,60,62,64,65], interval: 0.125, gap: 0.01, rate: 8000)
+        for start in stride(from: 0, to: samples.count, by: 800) {
+            let end = min(samples.count, start + 800)
+            for sample in samples[start..<end] { input.storage?.stream?.write(sample) }
+            now = 0.5 + Double(end) / 8000
+            following.tick()
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertGreaterThanOrEqual(following.position, 4.0, "All eight attacks must survive batched delivery")
+        following.stop()
+    }
+
     func testRenderedReleaseContinuesWhenConfiguredFreeFollowingBegins() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         // The written accompaniment ends at 2 seconds, but its WAV still rings.

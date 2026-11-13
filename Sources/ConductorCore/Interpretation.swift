@@ -39,63 +39,31 @@ public enum Interpretation {
         return PassageRange(start: start, end: end)
     }
 
-    private static func pitch(_ pcm: [Float], offset: Int, rate: Double) -> Double? {
-        let size = 256, minimum = Int(floor(rate / 1500)), maximum = min(size - 1, Int(ceil(rate / 55)))
-        guard maximum >= 2 else { return nil }
-        var energy = 0.0
-        for i in 0..<512 { let v = Double(pcm[offset + i]); energy += v * v }
-        guard sqrt(energy / 512) >= 0.002 else { return nil }
-        var differences = [Double](repeating: 0, count: maximum + 1), sum = 0.0
-        for lag in 1...maximum {
-            var difference = 0.0
-            for i in 0..<size { let v = Double(pcm[offset + i]) - Double(pcm[offset + i + lag]); difference += v * v }
-            sum += difference
-            differences[lag] = sum != 0 ? difference * Double(lag) / sum : 1
-        }
-        var lag = max(2, minimum)
-        while lag < maximum {
-            if differences[lag] < 0.15 {
-                while lag + 1 <= maximum && differences[lag + 1] < differences[lag] { lag += 1 }
-                let a = differences[lag - 1], b = differences[lag], c = differences[min(maximum, lag + 1)]
-                let denominator = a + c - 2 * b
-                let shift = denominator != 0 ? max(-0.5, min(0.5, (a - c) / (2 * denominator))) : 0
-                return 69 + 12 * log2((rate / (Double(lag) + shift)) / 440)
-            }
-            lag += 1
-        }
-        return nil
-    }
-
     public static func detectNotes(samples: [Float], sampleRate: Double) -> [ObservedNote] {
-        guard sampleRate.isFinite, sampleRate >= 1, sampleRate < Double(Int.max), samples.allSatisfy({ $0.isFinite }) else { return [] }
-        let factor = max(1, Int(floor(sampleRate / 8000))), rate = sampleRate / Double(factor)
-        var pcm = [Float](repeating: 0, count: samples.count / factor)
-        for i in pcm.indices {
-            var sum = 0.0
-            for j in 0..<factor { sum += Double(samples[i * factor + j]) }
-            pcm[i] = Float(sum / Double(factor))
+        guard sampleRate.isFinite, (4000...384000).contains(sampleRate), samples.allSatisfy({ $0.isFinite }) else { return [] }
+        var analyzer = SoloAudioAnalyzer(sampleRate: sampleRate)
+        struct Run { let pitch: Int; var start: Double; var end: Double; var count: Int }
+        var current: Run?, notes: [ObservedNote] = []
+        func finish() {
+            if let run = current, run.count >= 2 {
+                notes.append(ObservedNote(pitch: run.pitch, start: max(0, run.start - 0.005), end: run.end))
+            }
+            current = nil
         }
-        let hop = max(1, Int(floor(rate * 0.01 + 0.5)))
-        struct Run { let pitch: Int?; var start: Double; var end: Double; var count: Int }
-        var runs: [Run] = [], current: Run?
-        var i = 0
-        while i + 512 <= pcm.count {
+        // Bound cancellation latency and temporary storage even for a two-minute take.
+        for start in stride(from: 0, to: samples.count, by: 4096) {
             if Task.isCancelled { return [] }
-            let note = pitch(pcm, offset: i, rate: rate).map { Int(floor($0 + 0.5)) }
-            let time = (Double(i) + 256) / rate
-            if current == nil || note != current?.pitch {
-                if let current { runs.append(current) }
-                current = Run(pitch: note, start: time, end: time + Double(hop) / rate, count: 1)
-            } else { current!.end = time + Double(hop) / rate; current!.count += 1 }
-            i += hop
+            for observation in analyzer.process(Array(samples[start..<min(samples.count, start + 4096)])) {
+                guard let pitch = observation.pitch else { finish(); continue }
+                if current?.pitch != pitch || (observation.rearticulated && (current?.count ?? 0) >= 4) {
+                    finish()
+                    current = Run(pitch: pitch, start: observation.time, end: observation.time + 0.005, count: 1)
+                } else {
+                    current!.end = observation.time + 0.005; current!.count += 1
+                }
+            }
         }
-        if let current { runs.append(current) }
-        var notes: [ObservedNote] = []
-        for run in runs {
-            guard let note = run.pitch, run.count >= 3 else { continue }
-            if let previous = notes.last, previous.pitch == note, run.start - previous.end < 0.035 { notes[notes.count - 1].end = run.end }
-            else { notes.append(ObservedNote(pitch: note, start: max(0, run.start - 0.015), end: run.end)) }
-        }
+        finish()
         return notes
     }
 

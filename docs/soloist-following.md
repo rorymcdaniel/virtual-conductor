@@ -103,8 +103,8 @@ implementation is available through **Live following…** in the app.
 - Start opens the selected microphone and waits for it to deliver audio before
   the preparatory gesture. A USB input that briefly stops while being connected
   gets a startup retry on the same device. The full configured count-in follows.
-- Live analysis uses a bounded microphone queue, short pitch-analysis windows,
-  and local phrase matching. It tolerates nearby skipped/wrong notes and detects
+- Live analysis uses a bounded microphone queue, shared 40 ms pitch-analysis
+  windows at 10 ms sample-clock intervals, and local phrase matching. It tolerates nearby skipped/wrong notes and detects
   repeated-pitch articulation from amplitude dips. It is not a general-purpose
   score follower for arbitrary jumps, multiphonics, or chords.
 - MusicXML concert pitches include chromatic and octave transposition. The
@@ -179,3 +179,7 @@ entrances by their rise from silence and locating the others by matching short
 stretches of the recorded sound to the source WAV. Approximate worst absolute
 offsets changed from 96 to 51 ms, 68 to 48 ms, and 168 to 52 ms, respectively.
 The replay excludes physical microphone and headphone latency.
+
+Beat detection was revised on 2026-11-12 to preserve every analysis frame in
+batched microphone delivery and share articulation/pitch analysis with Record
+interpretation. See [reproduction, acceptance checks, and limits](beat-detection-validation.md).
