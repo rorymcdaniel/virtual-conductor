@@ -133,11 +133,14 @@ implementation is available through **Live following…** in the app.
   open-back headphone leakage, and perceived orchestral stretching quality
   remain unvalidated. Repeated identical notes without detectable articulation
   and ambiguous repeated phrases are particular cases to try.
-- Wait points, solo selection, and the enable switch are stored against the
-  exact MIDI and MusicXML bytes. Changed exports start with fresh following
-  settings rather than silently applying stale entrance positions. The tempo
-  tolerance is global. Original scores, WAV exports, and recorded takes are
-  never changed by live following.
+- Live following and long-rest cues share the current solo staff. A reread or
+  **Keep it** can retain that selection when the app can establish that it is
+  still the same score. Saving **Live following…** stores the staff, wait
+  points, free passages, and enable switch against the exact MIDI and MusicXML
+  bytes. Changed exports without saved settings for that exact pair start with
+  following off and no saved instructions, even when the staff is retained.
+  The tempo tolerance is global. Original scores, WAV exports, and recorded
+  takes are never changed by live following.
 
 ## Reproducible checks
 

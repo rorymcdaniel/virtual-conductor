@@ -21,27 +21,13 @@ extension PerformanceAudio: FollowingAudio {}
 }
 extension InputCapture: FollowingInput {}
 
-struct FollowingConfiguration: Codable {
-    var enabled = false
-    var solo: MusicXMLStaffID?
-    var waits: [WaitPoint] = []
-    var freePassages: [PassageRange] = []
-
-    init() {}
-    init(from decoder: Decoder) throws {
-        let fields = try decoder.container(keyedBy: CodingKeys.self)
-        enabled = try fields.decode(Bool.self, forKey: .enabled)
-        solo = try fields.decodeIfPresent(MusicXMLStaffID.self, forKey: .solo)
-        waits = try fields.decode([WaitPoint].self, forKey: .waits)
-        freePassages = try fields.decodeIfPresent([PassageRange].self, forKey: .freePassages) ?? []
-    }
-}
-
 /// Owns the live microphone and a prepared, bounded playback timeline. Existing
 /// recorded interpretations never share this capture engine or analysis storage.
 @MainActor final class LiveFollowing: ObservableObject {
-    @Published var configuration = FollowingConfiguration()
-    @Published var tolerance: Double = UserDefaults.standard.object(forKey: "following-tolerance") as? Double ?? 10
+    @Published var tolerance: Double {
+        didSet { defaults.set(tolerance, forKey: "following-tolerance") }
+    }
+    private let defaults: UserDefaults
     @Published var inputID: UInt32 = AudioDevices.defaultID(input: true)
     @Published private(set) var status: FollowingStatus = .following
     @Published private(set) var detail = "Use headphones. Choose your solo staff and microphone."
@@ -72,32 +58,20 @@ struct FollowingConfiguration: Codable {
     private var articulationWindow: [Float] = []
     private var analyzing = false
     private var generation: UInt64 = 0
-    private var key = ""
     var completed: (() -> Void)?
     var failed: ((String) -> Void)?
 
     private enum Phase { case audio, wait(Double), free(PassageRange), cadenza(CompiledCadenza) }
 
     init(capture: (any FollowingInput)? = nil, clock: @escaping () -> Double = { PerformanceAudio.hostSeconds },
-         permission: @escaping () async -> Bool = { await AVCaptureDevice.requestAccess(for: .audio) }) {
+         permission: @escaping () async -> Bool = { await AVCaptureDevice.requestAccess(for: .audio) },
+         defaults: UserDefaults = .standard) {
         self.capture = capture ?? InputCapture(); self.clock = clock; self.permission = permission
-        if !tolerance.isFinite || !(0...75).contains(tolerance) { tolerance = 10 }
+        self.defaults = defaults
+        let saved = defaults.object(forKey: "following-tolerance") as? Double ?? 10
+        tolerance = saved.isFinite && (0...75).contains(saved) ? saved : 10
         self.capture.interrupted = { [weak self] in self?.inputFailed() }
     }
-    func loadSettings(key: String) {
-        stop(); self.key = "following-v1-" + key
-        if let data = UserDefaults.standard.data(forKey: self.key),
-           let saved = try? JSONDecoder().decode(FollowingConfiguration.self, from: data) { configuration = saved }
-        else { configuration = FollowingConfiguration() }
-    }
-    func save(_ values: FollowingConfiguration, tolerance: Double) throws {
-        guard tolerance.isFinite, (0...75).contains(tolerance) else { throw MusicalError("Choose a tempo tolerance from 0–75%.") }
-        let data = try JSONEncoder().encode(values)
-        configuration = values; self.tolerance = tolerance
-        UserDefaults.standard.set(data, forKey: key)
-        UserDefaults.standard.set(tolerance, forKey: "following-tolerance")
-    }
-
     func start(prepared: PreparedPerformance, plan: FollowingPlan, audio: any FollowingAudio, position: Double) async throws {
         stop()
         generation &+= 1; let token = generation

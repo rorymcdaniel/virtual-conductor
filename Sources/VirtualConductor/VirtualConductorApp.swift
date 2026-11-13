@@ -10,6 +10,7 @@ import SwiftUI
     }
     @StateObject private var model = PerformanceModel()
     @State private var keys: PerformanceKeys?
+    @State private var didRestore = false
     var body: some Scene {
         Window("Virtual Conductor", id:"performance") {
             MainView(model:model)
@@ -18,11 +19,15 @@ import SwiftUI
                 .onAppear {
                     if keys == nil { keys = PerformanceKeys(model:model) }
                     NSApp.setActivationPolicy(.regular); NSApp.activate(ignoringOtherApps:true)
+                    guard !didRestore else { return }
+                    didRestore = true
                     let args = CommandLine.arguments
                     if args.count >= 3, model.prepared == nil {
                         let musicXML = args.count >= 4 ? URL(fileURLWithPath: args[3]) : nil
                         model.load(midi: URL(fileURLWithPath: args[1]), wav: URL(fileURLWithPath: args[2]),
                                    musicXML: musicXML, scoreIdentity: musicXML)
+                    } else {
+                        model.restoreRehearsal()
                     }
                 }
         }.defaultSize(width:1120,height:850)

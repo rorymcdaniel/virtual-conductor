@@ -89,11 +89,13 @@ struct RecordingView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    Picker("Input", selection: $model.inputID) {
+                    Picker("Input", selection: Binding(get: { model.inputID }, set: model.selectInput)) {
+                        if model.inputID == RecordingModel.unavailableInputID {
+                            Text("Selected input unavailable").tag(RecordingModel.unavailableInputID)
+                        }
                         Text("System default input").tag(UInt32(0))
                         ForEach(model.inputs) { input in Text(input.name).tag(input.id) }
                     }.disabled(locked)
-                        .onChange(of: model.inputID) { _, _ in model.changeInput() }
                     Button(model.inputReady ? "Re-enable input" : "Enable input", action: model.enableInput)
                         .disabled(locked)
                 }
