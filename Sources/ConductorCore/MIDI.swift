@@ -1,12 +1,12 @@
 import Foundation
 
-public struct MusicalError: Error, LocalizedError, Equatable, Sendable {
+public struct MusicalError: Error, LocalizedError, Equatable, Codable, Sendable {
     public let message: String
     public init(_ message: String) { self.message = message }
     public var errorDescription: String? { message }
 }
 
-public struct MIDINote: Equatable, Sendable {
+public struct MIDINote: Equatable, Codable, Sendable {
     public let pitch: Int
     public let startQuarter: Double
     public let endQuarter: Double
@@ -15,20 +15,20 @@ public struct MIDINote: Equatable, Sendable {
     }
 }
 
-public struct MIDITrack: Equatable, Sendable {
+public struct MIDITrack: Equatable, Codable, Sendable {
     public let name: String
     public let notes: Int
     public let noteEvents: [MIDINote]
 }
 
-public struct TempoSegment: Equatable, Sendable {
+public struct TempoSegment: Equatable, Codable, Sendable {
     public let quarter: Double
     public let seconds: Double
     public let secondsPerQuarter: Double
 }
 
 /// A standard format 0/1 MIDI file with a single 4/4 musical timeline.
-public struct MIDIFile: Sendable {
+public struct MIDIFile: Codable, Sendable {
     public let ppqn: Int
     public let tracks: [MIDITrack]
     public let segments: [TempoSegment]

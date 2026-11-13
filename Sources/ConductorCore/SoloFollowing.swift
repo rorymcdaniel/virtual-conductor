@@ -77,7 +77,7 @@ public enum FollowingStatus: String, Sendable {
 /// Stateful, local phrase matching. Only fresh attacks advance repeated pitches.
 /// Missed/wrong notes are tolerated by searching ahead; time is a prior, never a
 /// command to advance a freely played passage. No audio or UI dependencies.
-public struct SoloTracker: Sendable {
+public struct SoloTracker: Codable, Sendable {
     public private(set) var index: Int?
     public private(set) var lastMatch = -Double.infinity
     public private(set) var lastAttack = -Double.infinity
@@ -87,7 +87,8 @@ public struct SoloTracker: Sendable {
     private var candidatePitch: Int?
     private var candidateCount = 0
     private var silentFrames = 0
-    private var anchors: [(scoreTime: Double, hostTime: Double)] = []
+    private struct Anchor: Codable, Sendable { let scoreTime: Double; let hostTime: Double }
+    private var anchors: [Anchor] = []
     private var candidateSince = 0.0
     private var previousFrameTime: Double?
     private var searchStart = 0
@@ -109,7 +110,7 @@ public struct SoloTracker: Sendable {
             abs((lastAttack - anchor.hostTime) * rate - (scoreTime - anchor.scoreTime)) < 0.04
         }
         if !steady || abs(rate - 1) > tolerance { rate = 1 }
-        anchors = [(scoreTime, lastAttack)]
+        anchors = [Anchor(scoreTime: scoreTime, hostTime: lastAttack)]
     }
 
     @discardableResult
@@ -157,7 +158,7 @@ public struct SoloTracker: Sendable {
         // Estimate pace over a short phrase. A frame of onset jitter on a single
         // triplet should not drive the accompaniment all the way to its tempo limit.
         while anchors.count > 1 && onset - anchors[1].hostTime >= 1.2 { anchors.removeFirst() }
-        anchors.append((scoreTime, onset))
+        anchors.append(Anchor(scoreTime: scoreTime, hostTime: onset))
         if onset - anchors[0].hostTime > 0.08 {
             // Fit all the attacks so one late triplet does not set the pace
             // throughout the long note or written rest that follows it.

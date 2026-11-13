@@ -27,6 +27,7 @@ extension InputCapture: FollowingInput {}
     @Published var tolerance: Double {
         didSet { defaults.set(tolerance, forKey: "following-tolerance") }
     }
+    let diagnostics = FollowingDiagnostics()
     private let defaults: UserDefaults
     @Published var inputID: UInt32 = AudioDevices.defaultID(input: true)
     @Published private(set) var status: FollowingStatus = .following
@@ -98,6 +99,8 @@ extension InputCapture: FollowingInput {}
         self.prepared = prepared; self.plan = plan; self.audio = audio
         buffers = Dictionary(uniqueKeysWithValues: segments.map { ($0.position, $0) }); boundaries = limits
         self.position = position; active = true; lastTick = clock(); lastObservation = lastTick; droppedSamples = 0
+        diagnostics.begin(sampleRate: capture.sampleRate, tolerance: tolerance, plan: plan, midi: prepared.midi)
+        diagnostics.notice("Following started", time: clock())
         tracker.reset(notes: plan.notes, quarter: quarter(position))
         approvedWaits = Set(plan.waits.filter { seconds($0) < position - 1e-7 })
         tempo.reset(); audio.setRate(1)
@@ -105,6 +108,7 @@ extension InputCapture: FollowingInput {}
     }
 
     func stop() {
+        if active { diagnostics.notice("Following stopped", time: clock()) }
         generation &+= 1; capture.release(); active = false; analyzing = false
         analyzer = nil; analysisOrigin = nil; analysisSamples = 0
         level = 0; lastPitch = nil; lastObservation = 0
@@ -149,6 +153,7 @@ extension InputCapture: FollowingInput {}
 
     func cue() {
         guard active else { return }
+        diagnostics.notice("Manual pedal cue", time: clock())
         do {
             switch phase {
             case .wait(let q):
@@ -249,6 +254,8 @@ extension InputCapture: FollowingInput {}
     }
 
     private func resetAnalysis() {
+        diagnostics.audioDiscontinuity()
+        diagnostics.notice("Audio delivery discontinuity; recognition timing reset", time: clock())
         analyzer = nil; analysisOrigin = nil; analysisSamples = 0; status = .lost
         // Keep sounding identity even immediately before a wait boundary:
         // discarding timing must never turn a held note into a new attack.
@@ -279,6 +286,7 @@ extension InputCapture: FollowingInput {}
             analyzer = SoloAudioAnalyzer(sampleRate: capture.sampleRate)
             analysisOrigin = now - Double(incoming.count) / capture.sampleRate
         }
+        diagnostics.capture(incoming, start: analysisOrigin! + Double(analysisSamples) / capture.sampleRate)
         analysisSamples += incoming.count
         analyzing = true
         let processor = analyzer!, origin = analysisOrigin!, token = generation
@@ -315,8 +323,13 @@ extension InputCapture: FollowingInput {}
         case .wait(let entrance): free = true; lastQuarter = entrance
         default: free = false; lastQuarter = .infinity
         }
+        let before = tracker
+        let expected = quarter(position)
         let matched = tracker.observe(pitch: pitch, time: time, notes: plan.notes, expectedQuarter: quarter(position),
                                       free: free, midi: prepared.midi, rearticulated: rearticulated, throughQuarter: lastQuarter)
+        diagnostics.record(FollowingDecision(tracker: before, pitch: pitch, time: time, expectedQuarter: expected,
+                                             free: free, throughQuarter: lastQuarter, rearticulated: rearticulated,
+                                             matched: matched, rate: tracker.rate, phase: String(describing: phase), level: level))
         guard let matched else { return }
         let q = plan.notes[matched].startQuarter
         do {
@@ -344,5 +357,5 @@ extension InputCapture: FollowingInput {}
     }
 
     private func inputFailed() { fail(MusicalError("Following microphone interrupted. Playback paused; reconnect the input and resume explicitly.")) }
-    private func fail(_ error: Error) { stop(); status = .lost; detail = error.localizedDescription; failed?(detail) }
+    private func fail(_ error: Error) { diagnostics.notice(error.localizedDescription, time: clock()); stop(); status = .lost; detail = error.localizedDescription; failed?(detail) }
 }
