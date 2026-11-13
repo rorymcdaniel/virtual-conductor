@@ -53,9 +53,9 @@ extension InputCapture: FollowingInput {}
     private var lastPitch: Int?
     private var lastObservation = 0.0
     private var droppedSamples = 0
-    private var window: [Float] = []
-    private var articulation = LiveArticulation()
-    private var articulationWindow: [Float] = []
+    private var analyzer: SoloAudioAnalyzer?
+    private var analysisOrigin: Double?
+    private var analysisSamples = 0
     private var analyzing = false
     private var generation: UInt64 = 0
     var completed: (() -> Void)?
@@ -106,7 +106,7 @@ extension InputCapture: FollowingInput {}
 
     func stop() {
         generation &+= 1; capture.release(); active = false; analyzing = false
-        window = []; articulationWindow = []; articulation = LiveArticulation()
+        analyzer = nil; analysisOrigin = nil; analysisSamples = 0
         level = 0; lastPitch = nil; lastObservation = 0
         if let audio { audio.stop(); audio.setRate(1) }
         self.audio = nil; buffers = [:]; boundaries = []; queuedEnd = nil
@@ -248,14 +248,11 @@ extension InputCapture: FollowingInput {}
         } catch { fail(error) }
     }
 
-    func expectedReturnPitch(at time: Double) -> Int? {
-        guard case .free(let range) = phase, let plan, let index = tracker.index,
-              plan.notes.indices.contains(index + 1), time - tracker.lastMatch < 0.4 else { return nil }
-        let next = plan.notes[index + 1]
-        guard abs(next.startQuarter - range.end) < 1e-7, next.pitch != plan.notes[index].pitch,
-              !plan.waits.contains(where: { $0 >= range.start && $0 <= range.end && !approvedWaits.contains($0) })
-        else { return nil }
-        return next.pitch
+    private func resetAnalysis() {
+        analyzer = nil; analysisOrigin = nil; analysisSamples = 0; status = .lost
+        // Keep sounding identity even immediately before a wait boundary:
+        // discarding timing must never turn a held note into a new attack.
+        if let plan { tracker.reset(notes: plan.notes, quarter: quarter(position), preservingSound: true) }
     }
 
     private func poll(now: Double) {
@@ -263,48 +260,48 @@ extension InputCapture: FollowingInput {}
         level = storage.peak.load(ordering: .relaxed)
         guard !analyzing, let stream = storage.stream else { return }
         let dropped = stream.dropped.load(ordering: .acquiring)
-        if dropped != droppedSamples {
-            droppedSamples = dropped; _ = stream.drain(); window = []; status = .lost
+        let incoming = stream.drain()
+        // Discontinuities invalidate both the sample clock and phrase timing.
+        // Never let stale audio release a wait or cue an orchestral return.
+        if dropped != droppedSamples || Double(incoming.count) / capture.sampleRate > 0.25 {
+            droppedSamples = dropped; resetAnalysis()
             return
         }
-        let incoming = stream.drain()
         guard !incoming.isEmpty else { return }
-        let hop = max(1, Int(capture.sampleRate * 0.01))
-        articulationWindow.append(contentsOf: incoming)
-        var rearticulated = false
-        while articulationWindow.count >= hop {
-            let rms = sqrt(articulationWindow.prefix(hop).reduce(0.0) { $0 + Double($1) * Double($1) } / Double(hop))
-            let frameTime = now - Double(articulationWindow.count - hop) / capture.sampleRate
-            rearticulated = articulation.observe(rms: rms, time: frameTime) || rearticulated
-            articulationWindow.removeFirst(hop)
+        if let origin = analysisOrigin {
+            let sampleEnd = origin + Double(analysisSamples + incoming.count) / capture.sampleRate
+            // A missing delivery must not leave every later observation behind
+            // the transport clock. Normal tap/UI scheduling jitter stays below
+            // this allowance; accumulated contiguous batches retain their clock.
+            if abs(now - sampleEnd) > 0.04 { resetAnalysis() }
         }
-        let size = max(512 * max(1, Int(capture.sampleRate / 12000)), Int(capture.sampleRate * 0.045))
-        window.append(contentsOf: incoming)
-        if window.count > size { window.removeFirst(window.count - size) }
-        guard window.count >= size else { return }
+        if analyzer == nil {
+            analyzer = SoloAudioAnalyzer(sampleRate: capture.sampleRate)
+            analysisOrigin = now - Double(incoming.count) / capture.sampleRate
+        }
+        analysisSamples += incoming.count
         analyzing = true
-        let samples = window, rate = capture.sampleRate, token = generation
-        let tail = incoming.suffix(hop)
-        let silent = sqrt(tail.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(tail.count)) < 0.0015
-        let attack = rearticulated
-        let expected = expectedReturnPitch(at: now)
+        let processor = analyzer!, origin = analysisOrigin!, token = generation
         Task {
-            let (pitch, confirmed) = await Task.detached(priority: .userInitiated) { () -> (Int?, Bool) in
-                if silent { return (nil, false) }
-                if let expected, LivePitch.confirmsReturn(expected, samples: samples, sampleRate: rate) { return (expected, true) }
-                return (LivePitch.detect(samples: samples, sampleRate: rate), false)
+            let (updated, observations) = await Task.detached(priority: .userInitiated) {
+                var updated = processor
+                let observations = updated.process(incoming)
+                return (updated, observations)
             }.value
             guard token == generation, active else { return }
             analyzing = false
-            guard clock() - now < 0.25 else { status = .lost; return }
-            if confirmed {
-                guard expectedReturnPitch(at: now) == pitch else { return }
-                observe(pitch: pitch, time: now - 0.022)
-                observe(pitch: pitch, time: now - 0.012)
+            guard clock() - now < 0.25 else {
+                resetAnalysis()
                 return
             }
-            let observedAt = silent ? now : now - Double(samples.count) / (2 * rate)
-            observe(pitch: pitch, time: observedAt, rearticulated: attack)
+            analyzer = updated
+            // Preserve every 10 ms observation, including multiple attacks in a
+            // single tap delivery. Relative timing comes from samples, not UI polls.
+            for observation in observations {
+                guard active else { break }
+                observe(pitch: observation.pitch, time: origin + observation.time,
+                        rearticulated: observation.rearticulated)
+            }
         }
     }
 

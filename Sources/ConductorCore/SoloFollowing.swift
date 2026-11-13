@@ -1,4 +1,5 @@
 import Foundation
+import Accelerate
 
 public struct WaitPoint: Codable, Equatable, Sendable {
     public var measure: Int
@@ -186,8 +187,8 @@ public struct LiveArticulation: Sendable {
     public mutating func observe(rms: Double, time: Double) -> Bool {
         guard rms.isFinite, rms >= 0 else { return false }
         envelope = max(rms, envelope * 0.995)
-        if envelope > 0.004 && rms < envelope * 0.25 { dipped = true }
-        if dipped && rms > max(0.003, envelope * 0.6) && time - lastAttack > 0.08 {
+        if envelope > 0.0003 && rms < envelope * 0.25 { dipped = true }
+        if dipped && rms > max(0.0002, envelope * 0.6) && time - lastAttack > 0.08 {
             dipped = false; lastAttack = time; return true
         }
         return false
@@ -215,37 +216,26 @@ public struct FollowingTempo: Sendable {
 /// A small YIN detector for one live analysis window; work runs off the audio tap.
 public enum LivePitch {
     public static func detect(samples: [Float], sampleRate: Double, floor: Double = 0.003) -> Int? {
-        detect(samples: samples[...], sampleRate: sampleRate, floor: floor, minimumCount: 512)
-    }
-
-    /// Two short windows can confirm a known return pitch with less delay.
-    /// Lower notes need the ordinary longer window to resolve the fundamental.
-    public static func confirmsReturn(_ pitch: Int, samples: [Float], sampleRate: Double) -> Bool {
-        guard pitch >= 52, sampleRate.isFinite, (4000...384000).contains(sampleRate) else { return false }
-        let length = max(256 * max(1, Int(sampleRate / 12000)), Int(0.024 * sampleRate))
-        let hop = Int(0.010 * sampleRate)
-        guard samples.count >= length + hop else { return false }
-        let recent = samples.suffix(length)
-        return detect(samples: recent, sampleRate: sampleRate, floor: 0.003, minimumCount: 256) == pitch &&
-            detect(samples: samples.dropLast(hop).suffix(length), sampleRate: sampleRate, floor: 0.003, minimumCount: 256) == pitch
-    }
-
-    private static func detect(samples: ArraySlice<Float>, sampleRate: Double, floor: Double, minimumCount: Int) -> Int? {
-        guard sampleRate.isFinite, sampleRate >= 4000, sampleRate <= 384000, samples.count >= minimumCount else { return nil }
+        guard sampleRate.isFinite, (4000...384000).contains(sampleRate) else { return nil }
         let factor = max(1, Int(sampleRate / 12000)), rate = sampleRate / Double(factor)
         let count = samples.count / factor
-        guard count >= minimumCount else { return nil }
+        guard count >= max(128, Int(rate * 0.04)) else { return nil }
         var pcm = [Double](repeating: 0, count: count)
         for i in pcm.indices {
-            for j in 0..<factor { pcm[i] += Double(samples[samples.startIndex + i * factor + j]) / Double(factor) }
+            for j in 0..<factor { pcm[i] += Double(samples[i * factor + j]) / Double(factor) }
         }
-        guard pcm.allSatisfy(\.isFinite), sqrt(pcm.reduce(0) { $0 + $1 * $1 } / Double(count)) >= floor else { return nil }
+        guard pcm.allSatisfy(\.isFinite) else { return nil }
+        let mean = pcm.reduce(0, +) / Double(count)
+        for i in pcm.indices { pcm[i] -= mean }
+        guard sqrt(pcm.reduce(0) { $0 + $1 * $1 } / Double(count)) >= floor else { return nil }
         let size = count / 2, maximum = min(size - 1, Int(rate / 55)), minimum = max(2, Int(rate / 1800))
         guard maximum > minimum else { return nil }
         var values = [Double](repeating: 1, count: maximum + 1), sum = 0.0
         for lag in 1...maximum {
             var difference = 0.0
-            for i in 0..<size { let d = pcm[i] - pcm[i + lag]; difference += d * d }
+            pcm.withUnsafeBufferPointer { buffer in
+                vDSP_distancesqD(buffer.baseAddress!, 1, buffer.baseAddress! + lag, 1, &difference, vDSP_Length(size))
+            }
             sum += difference
             values[lag] = sum > 0 ? difference * Double(lag) / sum : 1
         }

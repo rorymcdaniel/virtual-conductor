@@ -28,7 +28,7 @@ final class InterpretationTests: XCTestCase {
         XCTAssertThrowsError(try Interpretation.align(observed: observed.map { ObservedNote(pitch: 90, start: $0.start, end: $0.end) }, reference: notes, range: PassageRange(start: 0, end: 4), duration: 3))
     }
 
-    func testSynthesizedSoloMatchesBrowserTimingExpectations() throws {
+    func testSynthesizedRubatoRecoversKnownBeatTimes() throws {
         let score = try midi(), reference = score.tracks[0].noteEvents
         let rate = 16000.0
         func seconds(_ q: Double) -> Double { 1.5 + q * 0.6 + q * q * 0.01 }
@@ -45,11 +45,9 @@ final class InterpretationTests: XCTestCase {
         let result = try Interpretation.analyze(samples: samples, sampleRate: rate, reference: reference, range: PassageRange(start: 0, end: 8))
         XCTAssertEqual(result.matched, 6)
         XCTAssertEqual(result.beats.count, 9)
-        // Captured from tempo-analysis.mjs analyzeTake with this synthesized PCM.
-        let expectedURL = try XCTUnwrap(Bundle.module.url(forResource: "synthetic-analysis", withExtension: "json", subdirectory: "Fixtures"))
-        let expected = try JSONSerialization.jsonObject(with: Data(contentsOf: expectedURL)) as! [String: Any]
-        XCTAssertEqual(result.beats.map(\.time), (expected["beats"] as! [[String: Double]]).map { $0["time"]! })
-        for beat in result.beats { XCTAssertEqual(beat.time, seconds(beat.quarter), accuracy: 0.08) }
+        // The new shared detector is judged against the independent synthesis
+        // clock, rather than preserving the former browser detector's errors.
+        for beat in result.beats { XCTAssertEqual(beat.time, seconds(beat.quarter), accuracy: 0.04) }
         XCTAssertGreaterThan(60 / (result.beats[1].time - result.beats[0].time), 60 / (result.beats[8].time - result.beats[7].time))
     }
 

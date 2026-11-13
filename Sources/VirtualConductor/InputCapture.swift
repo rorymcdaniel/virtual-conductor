@@ -85,7 +85,7 @@ final class CaptureStorage: @unchecked Sendable {
         let format = engine.inputNode.outputFormat(forBus:0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw NativeError.message("The selected device has no usable input.") }
         let storage = CaptureStorage(rate:format.sampleRate, streaming: streaming)
-        try engine.inputNode.installAudioTap(onBus:0,bufferSize:1024,format:format) { buffer, _ in storage.receive(buffer) }
+        try engine.inputNode.installAudioTap(onBus:0,bufferSize:streaming ? 256 : 1024,format:format) { buffer, _ in storage.receive(buffer) }
         // No connection from the microphone to the output mixer: no monitoring.
         engine.prepare()
         do { try engine.start() } catch { engine.inputNode.removeTap(onBus:0); throw error }
