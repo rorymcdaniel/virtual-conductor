@@ -24,6 +24,7 @@ public struct AnalysisResult: Equatable, Sendable {
     public let matched: Int
     public let total: Int
     public let warning: String
+    public let origins: [BeatOrigin]
 }
 
 /// Offline interpretation only. None of these operations changes score or playback timing.
@@ -120,7 +121,12 @@ public enum Interpretation {
             beats.append(BeatTime(quarter: q, time: Double(fixed(time))!)); q += 1
         }
         try validate(beats, duration: duration)
-        return AnalysisResult(beats: beats, matched: matched.count, total: notes.count, warning: "Draft estimate: review every beat. Repeated pitches, articulation, held notes and rests can make the alignment ambiguous. Beats between matched notes are interpolated; the final release is only an estimated end boundary.")
+        let origins: [BeatOrigin] = beats.map { beat in
+            if matched.contains(where: { abs($0.0.startQuarter - beat.quarter) < 1e-7 }) { return .attack }
+            if abs(last.0.endQuarter - beat.quarter) < 1e-7 { return .release }
+            return .inferred
+        }
+        return AnalysisResult(beats: beats, matched: matched.count, total: notes.count, warning: "Draft estimate: review every beat. Repeated pitches, articulation, held notes and rests can make the alignment ambiguous. Beats between matched notes are interpolated; the final release is only an estimated end boundary.", origins: origins)
     }
 
     public static func validate(_ beats: [BeatTime], duration: Double) throws {

@@ -6,7 +6,7 @@ import ConductorCore
     private func midi() throws -> MIDIFile { try MIDIFile(data:Data(contentsOf:Bundle.module.url(forResource:"fractional-tempo",withExtension:"mid",subdirectory:"Fixtures")!)) }
     func testPermissionAfterCloseCannotEnableInput() async {
         var continuation: CheckedContinuation<Bool,Never>?
-        let model = RecordingModel(audio:PerformanceAudio(), permission: { await withCheckedContinuation { continuation = $0 } })
+        let model = RecordingModel(audio:PerformanceAudio(),library:TakeLibrary(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)), permission: { await withCheckedContinuation { continuation = $0 } })
         model.open(); model.enableInput()
         while continuation == nil { await Task.yield() }
         model.close(); continuation?.resume(returning:true)
@@ -16,7 +16,7 @@ import ConductorCore
     func testCloseReopenKeepsFinalizationOwnershipAndRetainsTake() async throws {
         var continuation: CheckedContinuation<[Float],Never>?
         var permissionRequests = 0
-        let model = RecordingModel(audio:PerformanceAudio(),permission:{ permissionRequests += 1; return false },copySamples:{ _ in await withCheckedContinuation { continuation = $0 } })
+        let model = RecordingModel(audio:PerformanceAudio(),library:TakeLibrary(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),permission:{ permissionRequests += 1; return false },copySamples:{ _ in await withCheckedContinuation { continuation = $0 } })
         model.setScore(try midi(),fingerprint:"A"); model.open()
         model.finalizeCapture(CaptureStorage(rate:100),rate:100,range:PassageRange(start:0,end:4))
         while continuation == nil { await Task.yield() }
@@ -28,7 +28,7 @@ import ConductorCore
     }
     func testScoreRoundTripCannotAcceptOldCaptureCompletion() async throws {
         var continuation: CheckedContinuation<[Float],Never>?
-        let model = RecordingModel(audio:PerformanceAudio(),copySamples:{ _ in await withCheckedContinuation { continuation = $0 } })
+        let model = RecordingModel(audio:PerformanceAudio(),library:TakeLibrary(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)),copySamples:{ _ in await withCheckedContinuation { continuation = $0 } })
         let score = try midi()
         model.setScore(score,fingerprint:"A")
         model.finalizeCapture(CaptureStorage(rate:100),rate:100,range:PassageRange(start:0,end:4))

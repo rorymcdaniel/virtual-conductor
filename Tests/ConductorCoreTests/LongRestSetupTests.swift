@@ -215,7 +215,7 @@ final class LongRestSetupTests: XCTestCase {
         // Existing flat JSON, from before free passages were introduced.
         let legacy = #"{"enabled":true,"solo":{"partID":"Piano","staffNumber":2},"waits":[{"measure":1,"beat":1.5}]}"#
         defaults.set(Data(legacy.utf8), forKey: key)
-        let model = PerformanceModel(defaults: defaults)
+        let model = PerformanceModel(defaults: defaults, takeLibrary: TakeLibrary(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
         model.outputMissing = true
         model.load(midi: midi, wav: wav, musicXML: xml)
         while model.state == .loading { await Task.yield() }
@@ -242,7 +242,7 @@ final class LongRestSetupTests: XCTestCase {
         XCTAssertEqual(stored.solo, other)
         XCTAssertEqual(stored.waits, draft.waits)
 
-        let relaunched = PerformanceModel(defaults: defaults)
+        let relaunched = PerformanceModel(defaults: defaults, takeLibrary: TakeLibrary(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
         relaunched.outputMissing = true
         relaunched.restoreRehearsal()
         while relaunched.state == .loading { await Task.yield() }
@@ -295,7 +295,7 @@ final class LongRestSetupTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = CadenzaSettings(fileURL: directory.appendingPathComponent("cadenzas.json"))
-        let model = PerformanceModel(defaults: defaults, cadenzaSettings: store); model.outputMissing = true
+        let model = PerformanceModel(defaults: defaults, takeLibrary: TakeLibrary(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)), cadenzaSettings: store); model.outputMissing = true
         let xml = fixture("long-rest-eight-measures")
         model.load(midi: midi, wav: wav, musicXML: xml, scoreIdentity: directory)
         while model.state == .loading { await Task.yield() }
@@ -325,7 +325,7 @@ final class LongRestSetupTests: XCTestCase {
         XCTAssertEqual(model.prepared?.midi.openingBPM, 80)
         XCTAssertFalse(model.scorePreparation.following.enabled)
         XCTAssertTrue(model.scorePreparation.following.waits.isEmpty)
-        let relaunched = PerformanceModel(defaults: defaults, cadenzaSettings: store)
+        let relaunched = PerformanceModel(defaults: defaults, takeLibrary: TakeLibrary(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)), cadenzaSettings: store)
         relaunched.outputMissing = true
         relaunched.restoreRehearsal()
         while relaunched.state == .loading { await Task.yield() }

@@ -46,11 +46,12 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
     @Published private(set) var longRestSetup = LongRestSetup()
     private var rehearsalLocation: RehearsalLocation?
     private let defaults: UserDefaults
+    private let takeLibrary: TakeLibrary
     let audio = PerformanceAudio()
     let following: LiveFollowing
     let museScore = MuseScoreLink()
     lazy var recording: RecordingModel = {
-        let model = RecordingModel(audio: audio, defaults: defaults)
+        let model = RecordingModel(audio: audio, library: takeLibrary, defaults: defaults)
         model.museScore = museScore
         model.onKeep = { [weak self] files in self?.load(midi: files.midi, wav: files.wav, musicXML: files.musicXML, scoreIdentity: self?.rehearsalLocation?.scoreIdentity, preservingTake: true) }
         return model
@@ -66,8 +67,8 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
     private let settings: CadenzaSettings
     var locked: Bool { [.running,.starting,.loading].contains(state) }
     var shortcutsBlocked: Bool { utilityOpen || editorOpen || followingOpen || importOpen || filePanelOpen }
-    init(defaults: UserDefaults = .standard, cadenzaSettings: CadenzaSettings = CadenzaSettings()) {
-        self.defaults = defaults
+    init(defaults: UserDefaults = .standard, takeLibrary: TakeLibrary = TakeLibrary(), cadenzaSettings: CadenzaSettings = CadenzaSettings()) {
+        self.defaults = defaults; self.takeLibrary = takeLibrary
         settings = cadenzaSettings
         scorePreparation = ScorePreparation(defaults: defaults)
         following = LiveFollowing(defaults: defaults)
@@ -141,6 +142,7 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
 
     func testOutput() { guard !locked else { return }; do { if !audio.ready { chooseOutput() }; try audio.testTone() } catch { message = error.localizedDescription } }
     func load(midi: URL, wav: URL, musicXML: URL? = nil, scoreIdentity: URL? = nil, preservingTake: Bool = false, linked: Bool = false) {
+        guard recording.preserveCurrentTake() else { message = recording.saveMessage; return }
         if !preservingTake && !linked { museScore.disconnect() }
         run &+= 1; let token = run
         let scoreToken = scorePreparation.beginLoading()

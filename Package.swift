@@ -3,8 +3,9 @@ import PackageDescription
 let package = Package(
     name: "VirtualConductor",
     platforms: [.macOS("27.0")],
-    products: [.executable(name: "VirtualConductor", targets: ["VirtualConductor"])],
+    products: [.executable(name: "VirtualConductor", targets: ["VirtualConductor"]), .executable(name: "FollowingReplay", targets: ["FollowingReplay"])],
     targets: [
+        .executableTarget(name: "FollowingReplay", dependencies: ["ConductorCore"]),
         .target(name: "ConductorCore", swiftSettings: [.swiftLanguageMode(.v6)]),
         .executableTarget(name: "VirtualConductor", dependencies: ["ConductorCore"], resources: [.copy("Resources/MuseScore")]),
         .testTarget(name: "ConductorCoreTests", dependencies: ["ConductorCore", "VirtualConductor"], resources: [.copy("Fixtures")])

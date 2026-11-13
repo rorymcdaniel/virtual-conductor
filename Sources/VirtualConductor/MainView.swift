@@ -155,6 +155,7 @@ struct MainView: View {
                     }.disabled(!editable || model.state == .waiting)
                 }
             }
+            FollowingDiagnosticsControls(diagnostics: model.following.diagnostics, active: model.following.active)
             Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
             HStack(spacing: 10) {
                 Button("MuseScore rehearsal…") { model.pause(); museScoreOpen = true }.disabled(model.locked)
