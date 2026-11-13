@@ -53,7 +53,8 @@ public struct FollowingDiagnostic: Codable, Sendable {
         guard report.version == 1, !report.midi.segments.isEmpty,
               report.midi.segments.allSatisfy({ $0.quarter.isFinite && $0.seconds.isFinite && $0.secondsPerQuarter.isFinite && $0.secondsPerQuarter > 0 }),
               report.notes.allSatisfy({ $0.startQuarter.isFinite && $0.endQuarter.isFinite }),
-              report.decisions.allSatisfy({ $0.time.isFinite && $0.expectedQuarter.isFinite }) else {
+              report.decisions.allSatisfy({ $0.time.isFinite && $0.expectedQuarter.isFinite && !$0.throughQuarter.isNaN &&
+                  $0.tracker.validForReplay(noteCount: report.notes.count) && ($0.pitch.map { (0...127).contains($0) } ?? true) }) else {
             throw MusicalError("Unsupported or invalid following diagnostic.")
         }
         return report

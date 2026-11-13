@@ -418,6 +418,10 @@ final class SoloFollowingTests: XCTestCase {
         }
         XCTAssertEqual(audio.played.count, 2)
         XCTAssertEqual(audio.played.last?.position, 0.5)
+        let snapshot = try XCTUnwrap(following.diagnostics.snapshot())
+        XCTAssertFalse(snapshot.0.decisions.isEmpty)
+        XCTAssertTrue(snapshot.0.replay().isEmpty)
+        XCTAssertTrue(snapshot.1.isEmpty, "Ordinary following must not retain microphone audio without opt-in")
         following.stop()
     }
     func testHeldEarlierPitchDoesNotReleaseLaterWait() async throws {

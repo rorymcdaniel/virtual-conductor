@@ -15,7 +15,7 @@ open '.build/virtual-conductor/Virtual Conductor.app'
 
 For the integrated **play → listen → keep** workflow, choose **MuseScore rehearsal…**. See [MuseScore setup and testing status](docs/musescore-rehearsal.md). The first version automates preparation, renders your timing for listening, and applies kept timing to the open MuseScore score with Undo.
 
-Use **Load new exports…** to select a matching MIDI/WAV pair and optional matching MusicXML for live following and long-rest cues. Both features use the same solo staff, which you can select in the main window or save in **Live following…**. Choose a positive full-measure threshold for long rests. Re-export in MuseScore and use **Reread exports** after changes. The app reopens the last successfully loaded exports at launch if they are still available, without starting playback or recording. Takes remain session-scoped. Manual export loading never alters those files. The MuseScore companion changes the open score only when you choose **Keep it**; preparing again is required to reestablish the link after relaunch.
+Use **Load new exports…** to select a matching MIDI/WAV pair and optional matching MusicXML for live following and long-rest cues. Both features use the same solo staff, which you can select in the main window or save in **Live following…**. Choose a positive full-measure threshold for long rests. Re-export in MuseScore and use **Reread exports** after changes. The app reopens the last successfully loaded exports at launch if they are still available, without starting playback or recording. Completed takes and timing edits save automatically on this Mac, with a history for each exact score. Manual export loading never alters those files. The MuseScore companion changes the open score only when you choose **Keep it**; preparing again is required to reestablish the link after relaunch.
 
 Space plays/pauses, H shows/hides controls, and Right Arrow resumes from a configured cadenza wait. Text entry and modal utilities block performance shortcuts. The app remembers explicitly selected output and microphone devices without changing system defaults. If a selected device is unavailable, reconnect or choose another in the app. Recording uses a separate input engine without monitoring; microphone permission is requested when enabling input.
 
@@ -42,6 +42,10 @@ Settings are stored in app preferences for the exact MIDI/MusicXML export pair; 
 ## Interpretation review
 
 Choose a passage of up to 128 quarter beats, enable input and record up to 120 seconds. Analyze a monophonic solo part or set manual timing endpoints, review/edit each beat, and approve before exporting CSV. Edits revoke approval. Repeated pitches, sustained notes and rests can make alignment ambiguous. Live following and interpretation share sample-timed pitch/articulation analysis; see [beat detection checks and limits](docs/beat-detection-validation.md). MuseScore remains the editable master. Connected rehearsals can preview and keep timing directly; the CSV workflow remains available for manually loaded exports.
+
+Read [rehearsal recovery and review](docs/rehearsal-recovery-and-review.md) for
+saved-take history, detected-beat click playback, timing-source labels, and local
+following diagnostics with optional audio and a reproducible replay command.
 
 ## Checks
 

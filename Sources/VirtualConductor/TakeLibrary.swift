@@ -16,6 +16,14 @@ struct SavedTake: Codable, Identifiable, Sendable {
     var approved: Bool
     var manualStart: Double
     var manualEnd: Double
+    var valid: Bool {
+        version == 1 && sampleRate.isFinite && (1...384000).contains(sampleRate) && sampleCount > 0 &&
+        Double(sampleCount) / sampleRate <= 120.1 && range.start.isFinite && range.end.isFinite &&
+        range.start >= 0 && range.end > range.start && range.end - range.start <= 128 && range.end < Double(Int.max / 4) &&
+        created.timeIntervalSince1970.isFinite && abs(created.timeIntervalSince1970) < 32_503_680_000 &&
+        manualStart.isFinite && manualEnd.isFinite && beats.count <= 129 && beats.allSatisfy { $0.time.isFinite && $0.quarter.isFinite && $0.quarter >= range.start && $0.quarter <= range.end } &&
+        zip(beats, beats.dropFirst()).allSatisfy { $0.quarter < $1.quarter }
+    }
     var title: String { "\(created.formatted(date: .abbreviated, time: .standard)) · m. \(Int(range.start / 4) + 1)–\(Int(ceil(range.end / 4)))" }
 }
 
@@ -37,13 +45,14 @@ struct TakeLibrary: Sendable {
         for url in urls {
             do {
                 let item = try JSONDecoder().decode(SavedTake.self, from: Data(contentsOf: url))
-                guard item.version == 1, item.score == score, url.lastPathComponent == item.id.uuidString + ".json" else { throw MusicalError("Unsupported saved take.") }
+                guard item.valid, item.score == score, url.lastPathComponent == item.id.uuidString + ".json" else { throw MusicalError("Unsupported saved take.") }
                 takes.append(item)
             } catch { unreadable += 1 }
         }
         return (takes.sorted { $0.created > $1.created }, unreadable)
     }
     func save(_ item: SavedTake, samples: [Float]? = nil) throws {
+        guard item.valid else { throw MusicalError("This take has invalid metadata and could not be saved.") }
         let dir = directory(item.score)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let audio = dir.appendingPathComponent(item.id.uuidString + ".pcm")
@@ -56,9 +65,7 @@ struct TakeLibrary: Sendable {
         try encoder.encode(item).write(to: dir.appendingPathComponent(item.id.uuidString + ".json"), options: .atomic)
     }
     func load(_ item: SavedTake) throws -> RecordedTake {
-        guard item.version == 1, item.sampleRate.isFinite, (1...384000).contains(item.sampleRate),
-              item.sampleCount > 0, Double(item.sampleCount) / item.sampleRate <= 120.1,
-              item.range.start.isFinite, item.range.end.isFinite, item.range.end > item.range.start else { throw MusicalError("This saved take has invalid metadata.") }
+        guard item.valid else { throw MusicalError("This saved take has invalid metadata.") }
         let data = try Data(contentsOf: directory(item.score).appendingPathComponent(item.id.uuidString + ".pcm"))
         guard data.count / 4 == item.sampleCount, data.count % 4 == 0 else { throw MusicalError("This saved take's audio is incomplete. The original files have been retained.") }
         let samples = data.withUnsafeBytes { bytes in (0..<item.sampleCount).map { bytes.loadUnaligned(fromByteOffset: $0 * 4, as: Float.self) } }

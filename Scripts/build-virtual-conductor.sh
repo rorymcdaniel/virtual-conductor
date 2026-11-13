@@ -15,10 +15,12 @@ version_at_least() {
 version_at_least "$(sw_vers -productVersion)" 27.2 || { echo "macOS 27.2 or later is required." >&2; exit 1; }
 version_at_least "$(xcrun --sdk macosx --show-sdk-version)" 27.0 || { echo "macOS SDK 27.0 or later is required." >&2; exit 1; }
 swift build -c release --product VirtualConductor
+swift build -c release --product FollowingReplay
 BIN="$(swift build -c release --show-bin-path)"
 APP="$PWD/.build/virtual-conductor/Virtual Conductor.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/VirtualConductor" "$APP/Contents/MacOS/VirtualConductor"
+cp "$BIN/FollowingReplay" "$APP/Contents/MacOS/FollowingReplay"
 for bundle in "$BIN"/*.bundle; do
     if [ -d "$bundle" ]; then cp -R "$bundle" "$APP/Contents/Resources/"; fi
 done
@@ -30,5 +32,6 @@ identity="${VC_SIGNING_IDENTITY:-}"
 if [[ -z "$identity" ]]; then
     identity="$(security find-identity -v -p codesigning | awk '/"Apple Development:/ { hash=$2; count++ } END { if (count==1) print hash }')"
 fi
+codesign --force --sign "${identity:--}" "$APP/Contents/MacOS/FollowingReplay"
 codesign --force --sign "${identity:--}" "$APP"
 printf '%s\n' "$APP"

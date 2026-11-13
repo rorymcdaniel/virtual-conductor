@@ -40,6 +40,10 @@ final class TakeReviewTests: XCTestCase {
         let first = try XCTUnwrap(model.selectedTakeID)
         model.manualEnd = 1; model.manual(); model.editBeat(index: 1, time: 0.2); model.approve()
         XCTAssertFalse(model.saveFailed)
+        model.origins[0] = .attack
+        model.editBeat(index: 0, time: model.beats[0].time)
+        XCTAssertEqual(model.origins[0], .attack, "Focusing/leaving an unchanged field must preserve its timing source")
+        XCTAssertTrue(model.approved)
         next = [0.2, 0.4, 0.6]
         model.finalizeCapture(CaptureStorage(rate: 3), rate: 3, range: PassageRange(start: 0, end: 4))
         while model.busy { await Task.yield() }
@@ -86,6 +90,30 @@ final class TakeReviewTests: XCTestCase {
         XCTAssertNil(model.take)
         XCTAssertTrue(try library.list(score: "B").takes.isEmpty)
     }
+    func testFailedLateFinalizationIsRetainedAndRetryableAfterScoreChange() async throws {
+        let directory = root(); defer { try? FileManager.default.removeItem(at: directory) }
+        try Data([1]).write(to: directory)
+        let library = TakeLibrary(root: directory)
+        var continuation: CheckedContinuation<[Float], Never>?
+        let model = RecordingModel(audio: PerformanceAudio(), library: library, copySamples: { _ in await withCheckedContinuation { continuation = $0 } })
+        let score = try FollowingFixture.midi()
+        model.setScore(score, fingerprint: "A")
+        model.finalizeCapture(CaptureStorage(rate: 2), rate: 2, range: PassageRange(start: 0, end: 4))
+        while continuation == nil { await Task.yield() }
+        model.setScore(score, fingerprint: "B"); continuation?.resume(returning: [0.2,0.4])
+        for _ in 0..<200 {
+            if model.pendingRecoveryCount == 1 { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(model.pendingRecoveryCount, 1); XCTAssertTrue(model.saveFailed); XCTAssertNil(model.take)
+        try FileManager.default.removeItem(at: directory)
+        model.persistDraft()
+        XCTAssertEqual(model.pendingRecoveryCount, 0); XCTAssertFalse(model.saveFailed)
+        let item = try XCTUnwrap(library.list(score: "A").takes.first)
+        XCTAssertEqual(try library.load(item).samples, [0.2,0.4])
+        XCTAssertTrue(try library.list(score: "B").takes.isEmpty)
+    }
+
     func testUnreadableMetadataAndTruncatedAudioDoNotDestroyOtherTakes() throws {
         let directory = root(); defer { try? FileManager.default.removeItem(at: directory) }
         let library = TakeLibrary(root: directory)
@@ -94,10 +122,24 @@ final class TakeReviewTests: XCTestCase {
         let folder = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first)
         try Data("broken".utf8).write(to: folder.appendingPathComponent("broken.json"))
         XCTAssertEqual(try library.list(score: "A").unreadable, 1)
+        let model = RecordingModel(audio: PerformanceAudio(), library: library)
+        model.setScore(try FollowingFixture.midi(), fingerprint: "A")
+        XCTAssertNotNil(model.take)
+        XCTAssertTrue(model.historyWarning.contains("1 saved take"))
+        model.persistDraft()
+        XCTAssertTrue(model.historyWarning.contains("1 saved take"))
         XCTAssertEqual(try library.load(item).samples, [0.1,0.2])
         try Data([1]).write(to: folder.appendingPathComponent(item.id.uuidString + ".pcm"))
         XCTAssertThrowsError(try library.load(item))
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("broken.json").path))
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(item)) as? [String: Any])
+        json["beats"] = [["quarter": 1e100, "time": 0.5]]
+        try JSONSerialization.data(withJSONObject: json).write(to: folder.appendingPathComponent(item.id.uuidString + ".json"))
+        XCTAssertTrue(try library.list(score: "A").takes.isEmpty, "Invalid beat positions must be rejected before display")
+        json["beats"] = []
+        json["range"] = ["start": 1e100, "end": 2e100]
+        try JSONSerialization.data(withJSONObject: json).write(to: folder.appendingPathComponent(item.id.uuidString + ".json"))
+        XCTAssertTrue(try library.list(score: "A").takes.isEmpty, "Invalid title positions must be rejected before display")
     }
 }
 

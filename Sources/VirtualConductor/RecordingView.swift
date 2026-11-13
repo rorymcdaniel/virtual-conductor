@@ -34,10 +34,12 @@ struct RecordingView: View {
                             Button("Show files", action: model.showSavedTakes)
                         }
                     }
+                    if !model.historyWarning.isEmpty { Text(model.historyWarning).font(.callout).foregroundStyle(.orange) }
                     if !model.saveMessage.isEmpty {
                         HStack {
                             Text(model.saveMessage).font(.callout).foregroundStyle(model.saveFailed ? .orange : .secondary)
                             if model.saveFailed { Button("Retry save", action: model.persistDraft).disabled(locked) }
+                            if model.pendingRecoveryCount > 0 { Button("Export unsaved take", action: model.exportPendingTake).disabled(locked) }
                         }
                     }
                     passageSection
@@ -154,7 +156,7 @@ struct RecordingView: View {
                 }
                 Spacer()
                 Button(action: model.play) { Label(model.playing ? "Stop playback" : "Play take", systemImage: model.playing ? "stop.fill" : "play.fill") }
-                    .disabled(locked || (!model.beats.isEmpty && !validBeatMap))
+                    .disabled(locked || (model.hearBeats && !model.beats.isEmpty && !validBeatMap))
                 Button("Export WAV", action: model.exportWAV).disabled(locked)
             }
             if !model.beats.isEmpty {

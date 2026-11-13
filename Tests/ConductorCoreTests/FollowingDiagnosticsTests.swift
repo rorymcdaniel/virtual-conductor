@@ -12,7 +12,10 @@ import ConductorCore
         diagnostics.capture([Float](repeating: 0.2, count: 8000), start: 0)
         XCTAssertTrue(try XCTUnwrap(diagnostics.snapshot()).1.isEmpty)
         diagnostics.includeAudio = true
-        for second in 0..<20 { diagnostics.capture([Float](repeating: 0.2, count: 8000), start: Double(second)) }
+        for second in 0..<20 {
+            let tone = (0..<8000).map { Float(0.2 * sin(2 * .pi * 261.6256 * (Double(second) + Double($0) / 8000))) }
+            diagnostics.capture(tone, start: Double(second))
+        }
         let snapshot = try XCTUnwrap(diagnostics.snapshot())
         XCTAssertEqual(snapshot.1.count, 120000); XCTAssertEqual(snapshot.0.audioStart, 5); XCTAssertEqual(snapshot.0.audioEnd, 20)
         var tracker = SoloTracker()
@@ -28,8 +31,17 @@ import ConductorCore
         diagnostics.save()
         while diagnostics.saving { await Task.yield() }
         let url = try XCTUnwrap(diagnostics.savedURL)
+        if let destination = ProcessInfo.processInfo.environment["VC_DIAGNOSTIC_FIXTURE_OUTPUT"] {
+            try FileManager.default.copyItem(at: url, to: URL(fileURLWithPath: destination))
+        }
         let report = try FollowingDiagnostic.decode(Data(contentsOf: url.appendingPathComponent("report.json")))
         XCTAssertTrue(report.replay().isEmpty)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: report.encoded()) as? [String: Any])
+        var decisions = try XCTUnwrap(json["decisions"] as? [[String: Any]])
+        var invalidTracker = try XCTUnwrap(decisions[0]["tracker"] as? [String: Any])
+        invalidTracker["index"] = 999999
+        decisions[0]["tracker"] = invalidTracker; json["decisions"] = decisions
+        XCTAssertThrowsError(try FollowingDiagnostic.decode(JSONSerialization.data(withJSONObject: json)))
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.appendingPathComponent("audio.wav").path))
         diagnostics.includeAudio = false
         XCTAssertTrue(try XCTUnwrap(diagnostics.snapshot()).1.isEmpty)

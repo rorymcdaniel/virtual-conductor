@@ -22,11 +22,14 @@ struct RecordedTake: Sendable {
     @Published private(set) var selectedTakeID: UUID?
     @Published private(set) var saveMessage = ""
     @Published private(set) var saveFailed = false
+    @Published private(set) var historyWarning = ""
     @Published var origins: [BeatOrigin] = []
     @Published var hearBeats = false { didSet { stopPlayback() } }
     @Published var clickLevel = 0.5 { didSet { stopPlayback() } }
     private let library: TakeLibrary
     private var takeInfo: SavedTake?
+    private var pendingRecovery: [(SavedTake, RecordedTake)] = []
+    @Published private(set) var pendingRecoveryCount = 0
     @Published var startMeasure = 1
     @Published var startBeat = 1
     @Published var endMeasure = 5
@@ -145,7 +148,14 @@ struct RecordedTake: Sendable {
             }.value
             // Completed audio is archived even when the user changed scores
             // during finalization, but an old completion cannot replace the UI.
-            guard captureToken == takeGeneration else { return }
+            guard captureToken == takeGeneration else {
+                if let error {
+                    pendingRecovery.append((item, RecordedTake(samples: samples, sampleRate: rate, range: range)))
+                    pendingRecoveryCount = pendingRecovery.count; saveFailed = true
+                    saveMessage = "A completed take from the previous score could not be saved: " + error + ". It remains in memory; retry saving or export the unsaved take before quitting."
+                }
+                return
+            }
             finalizing = false; busy = false
             take = RecordedTake(samples: samples, sampleRate: rate, range: range)
             takeInfo = item; selectedTakeID = item.id; beats = []; origins = []; approved = false
@@ -160,14 +170,22 @@ struct RecordedTake: Sendable {
     private func refreshHistory() {
         do {
             let result = try library.list(score: fingerprint); savedTakes = result.takes
-            if result.unreadable > 0 { saveMessage = "\(result.unreadable) saved take records could not be read; their files are retained." }
-        } catch { saveFailed = true; saveMessage = "Cannot read saved takes: " + error.localizedDescription }
+            historyWarning = result.unreadable > 0 ? "\(result.unreadable) saved take records could not be read; their files are retained." : ""
+        } catch { savedTakes = []; historyWarning = "Cannot read saved takes: " + error.localizedDescription }
     }
     func preserveCurrentTake() -> Bool {
         persistDraft()
-        return take == nil || !saveFailed
+        return (take == nil && pendingRecovery.isEmpty) || !saveFailed
     }
     func persistDraft() {
+        var remaining: [(SavedTake, RecordedTake)] = []
+        for (item, take) in pendingRecovery {
+            do { try library.save(item, samples: take.samples) }
+            catch { remaining.append((item, take)); saveMessage = "An earlier completed take is still unsaved: " + error.localizedDescription }
+        }
+        pendingRecovery = remaining; pendingRecoveryCount = remaining.count
+        saveFailed = !remaining.isEmpty
+        if remaining.isEmpty, take == nil { saveMessage = "Completed takes saved on this Mac." }
         guard let take, !fingerprint.isEmpty else { return }
         let item = SavedTake(id: takeInfo?.id ?? UUID(), created: takeInfo?.created ?? Date(), score: fingerprint,
                              sampleRate: take.sampleRate, sampleCount: take.samples.count, range: take.range,
@@ -176,7 +194,8 @@ struct RecordedTake: Sendable {
         takeInfo = item; selectedTakeID = item.id
         do {
             try library.save(item, samples: take.samples)
-            saveFailed = false; saveMessage = "Take and timing edits saved on this Mac."; refreshHistory()
+            if pendingRecovery.isEmpty { saveFailed = false; saveMessage = "Take and timing edits saved on this Mac." }
+            refreshHistory()
         } catch { saveFailed = true; saveMessage = "Not saved: " + error.localizedDescription + ". Retry saving or export the WAV before closing." }
     }
     func restoreTake(_ id: UUID) {
@@ -193,6 +212,11 @@ struct RecordedTake: Sendable {
             message = "Saved take restored. Preview accompaniment again before Keep it."
             saveFailed = false; saveMessage = "Saved on this Mac."
         } catch { saveFailed = true; saveMessage = "Could not restore this take: " + error.localizedDescription }
+    }
+    func exportPendingTake() {
+        guard let (_, take) = pendingRecovery.first else { return }
+        do { try save(Interpretation.encodeWAV(samples: take.samples, sampleRate: take.sampleRate), name: "virtual-conductor-recovered-take.wav") }
+        catch { message = error.localizedDescription }
     }
     func showSavedTakes() { NSWorkspace.shared.open(library.root) }
 
@@ -214,7 +238,7 @@ struct RecordedTake: Sendable {
     func play() {
         if playing { stopPlayback(); return }
         guard !recording,!busy,let take else { return }
-        do { if !beats.isEmpty { try Interpretation.validate(beats,duration:take.duration) }; let rendered = try TakeReviewAudio.render(samples: take.samples, sampleRate: take.sampleRate, beats: hearBeats ? beats : [], clickLevel: clickLevel)
+        do { if hearBeats && !beats.isEmpty { try Interpretation.validate(beats,duration:take.duration) }; let rendered = try TakeReviewAudio.render(samples: take.samples, sampleRate: take.sampleRate, beats: hearBeats ? beats : [], clickLevel: clickLevel)
             try audio.playTake(samples: rendered, sampleRate: take.sampleRate)
             playbackDuration = Double(rendered.count) / take.sampleRate; playbackTime = 0; playing = true }
         catch { message = error.localizedDescription }
@@ -236,7 +260,7 @@ struct RecordedTake: Sendable {
     func manual() { guard let take else { return }; proposal { try Interpretation.manual(range:take.range,start:manualStart,end:manualEnd,duration:take.duration) } }
     func simplify() { guard let take else { return }; proposal { try Interpretation.simplify(beats,duration:take.duration) } }
     private func proposal(_ work: () throws -> [BeatTime]) { stopPlayback(); approved = false; do { beats = try work(); origins = beats.map { _ in .manual }; persistDraft(); message = "Draft ready. Hear the accompaniment, or adjust timing if needed." } catch { message = error.localizedDescription } }
-    func editBeat(index: Int, time: Double) { guard beats.indices.contains(index) else { return }; stopPlayback(); approved = false; beats[index].time = time; if origins.indices.contains(index) { origins[index] = .manual }; persistDraft() }
+    func editBeat(index: Int, time: Double) { guard beats.indices.contains(index), beats[index].time != time else { return }; stopPlayback(); approved = false; beats[index].time = time; if origins.indices.contains(index) { origins[index] = .manual }; persistDraft() }
     func changeTrack() { generation &+= 1; analysis?.cancel(); beats = []; origins = []; approved = false; busy = false; persistDraft() }
     func approve() { guard let take else { return }; do { try Interpretation.validate(beats,duration:take.duration); approved = true; persistDraft(); message = "Approved for CSV export. Score and performance are unchanged." } catch { approved = false; message = error.localizedDescription } }
     func refreshLinkedScore(_ score: MIDIFile, fingerprint: String) {

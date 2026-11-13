@@ -94,6 +94,17 @@ public struct SoloTracker: Codable, Sendable {
     private var searchStart = 0
 
     public init() {}
+    public func validForReplay(noteCount: Int) -> Bool {
+        let validIndex = index.map { $0 >= 0 && $0 < noteCount } ?? true
+        let validPitches = [previousPitch, candidatePitch].allSatisfy { $0.map { (0...127).contains($0) } ?? true }
+        return validIndex && validPitches && searchStart >= 0 && searchStart <= noteCount &&
+            candidateCount >= 0 && candidateCount < Int.max / 2 && silentFrames >= 0 && silentFrames < Int.max / 2 &&
+            rate.isFinite && (0.1...4).contains(rate) && candidateSince.isFinite &&
+            (lastMatch.isFinite || lastMatch == -.infinity) && (lastAttack.isFinite || lastAttack == -.infinity) &&
+            (releasedAt?.isFinite ?? true) && (previousFrameTime?.isFinite ?? true) &&
+            anchors.count <= 10000 && anchors.allSatisfy { $0.hostTime.isFinite && $0.scoreTime.isFinite }
+    }
+
     public mutating func reset(notes: [MIDINote], quarter: Double, preservingSound: Bool = false) {
         let sounding = previousPitch, candidate = candidatePitch, count = candidateCount, since = candidateSince
         self = SoloTracker()

@@ -68,7 +68,7 @@ import ConductorCore
                     try snapshot.encoded().write(to: dir.appendingPathComponent("report.json"), options: .atomic)
                     let text = "Local following diagnostic. report.json contains score notes, timing, recognition decisions and interruption notices. " +
                         (samples.isEmpty ? "No microphone audio was saved." : "audio.wav contains up to 15 seconds of opted-in microphone audio.") +
-                        "\nReplay: swift run FollowingReplay '/path/to/this/folder/report.json'\nAdd --audio to re-analyze the audio excerpt. Replay checks recognition decisions, not acoustic output latency.\n"
+                        "\nReplay: '/Applications/Virtual Conductor.app/Contents/MacOS/FollowingReplay' '/path/to/this/folder/report.json'\nAdd --audio to re-analyze the audio excerpt. Replay checks recognition decisions, not acoustic output latency.\n"
                     try text.write(to: dir.appendingPathComponent("README.txt"), atomically: true, encoding: .utf8)
                     return dir
                 }.value

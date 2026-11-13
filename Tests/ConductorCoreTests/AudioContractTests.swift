@@ -45,7 +45,7 @@ final class AudioContractTests: XCTestCase {
         XCTAssertEqual(storage.count.load(ordering:.acquiring),12000)
     }
     @MainActor func testUtilitySuspensionClosesSheetAndCancelsStartingState() {
-        let model = PerformanceModel()
+        let model = PerformanceModel(takeLibrary: TakeLibrary(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
         model.state = .starting
         model.openRecording()
         XCTAssertEqual(model.state,.paused)
@@ -55,7 +55,7 @@ final class AudioContractTests: XCTestCase {
         XCTAssertFalse(model.recording.inputReady)
     }
     @MainActor func testApprovalRevocationAndFailedCaptureRetainsPriorTake() throws {
-        let midi = try midi(), model = RecordingModel(audio:PerformanceAudio())
+        let midi = try midi(), model = RecordingModel(audio:PerformanceAudio(), library: TakeLibrary(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
         model.setScore(midi,fingerprint:"a"); model.open()
         model.take = RecordedTake(samples:[Float](repeating:0.2,count:8000),sampleRate:8000,range:PassageRange(start:0,end:4))
         model.manualStart = 0; model.manualEnd = 1; model.manual(); model.approve()
