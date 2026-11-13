@@ -17,8 +17,10 @@ final class AudioContractTests: XCTestCase {
         let first = p.segments[0], second = p.segments[1]
         XCTAssertEqual(first.end,p.timing.prepSeconds+midi.seconds(atQuarter:1))
         XCTAssertEqual(second.position,p.timing.prepSeconds+midi.seconds(atQuarter:3))
-        XCTAssertEqual(Int(first.music.frameLength),Int((first.end*rate).rounded()))
-        XCTAssertEqual(first.music.frameLength,first.clicks.frameLength)
+        XCTAssertEqual(Int(first.clicks.frameLength),Int((first.end*rate).rounded()))
+        // Continuously sounding audio is capped at the return, with a smooth end.
+        XCTAssertEqual(Int(first.music.frameLength),Int((second.position*rate).rounded()))
+        XCTAssertEqual(first.music.floatChannelData![1][Int(first.music.frameLength)-1], 0)
         XCTAssertEqual(second.music.frameLength,second.clicks.frameLength)
         let sourceOffset = Int((second.position*rate).rounded())-Int((p.timing.prepSeconds*rate).rounded())
         XCTAssertEqual(second.music.floatChannelData![1][0],source.floatChannelData![1][sourceOffset])
@@ -31,6 +33,27 @@ final class AudioContractTests: XCTestCase {
         let tailStart = Int(((p.timing.musicalEnd-second.position)*rate).rounded())
         XCTAssertTrue((tailStart..<Int(second.clicks.frameLength)).allSatisfy { second.clicks.floatChannelData![0][$0] == 0 })
     }
+    func testCadenzaReleaseStopsAtQuietGapAndNeverPlaysAnUnlimitedTail() throws {
+        let base = try FollowingFixture.prepared(), rate = 8000.0
+        for continuous in [false, true] {
+            base.source.floatChannelData![0].initialize(repeating: 0, count: Int(base.source.frameLength))
+            let end = continuous ? Int(base.source.frameLength) : 4000
+            for i in 2000..<end { base.source.floatChannelData![0][i] = 0.1 }
+            if !continuous { base.source.floatChannelData![0][10000] = 1 } // Later notes must stay skipped.
+            let prepared = try PreparedPerformance(midi: base.midi, source: base.source, preparation: 0,
+                passages: [CadenzaPassage(startMeasure: 1, startBeat: 1.5, returnMeasure: 3, returnBeat: 1)])
+            let segment = prepared.segments[0]
+            XCTAssertEqual(segment.end, 0.75)
+            XCTAssertEqual(segment.clicks.frameLength, 6000)
+            XCTAssertEqual(segment.music.floatChannelData![0][6500], 0.1)
+            XCTAssertEqual(Int(segment.music.frameLength), continuous ? Int((segment.end + 3)*rate) : 8400)
+            XCTAssertEqual(segment.music.floatChannelData![0][Int(segment.music.frameLength)-1], 0)
+            let resumed = try PreparedPerformance.makeSegment(source: prepared.source, timing: prepared.timing,
+                position: 0.6, end: segment.end, ringOutUntil: PreparedPerformance.cadenzaReleaseEnd(prepared.passages[0], timing: prepared.timing))
+            XCTAssertEqual(Double(resumed.music.frameLength)/rate + resumed.position, Double(segment.music.frameLength)/rate, accuracy: 1/rate)
+        }
+    }
+
     func testCaptureStorageMonoLeadingSilenceAndLimit() {
         let rate = 100.0, storage = CaptureStorage(rate:rate)
         let format = AVAudioFormat(standardFormatWithSampleRate:rate,channels:2)!

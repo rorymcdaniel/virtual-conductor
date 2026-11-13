@@ -271,8 +271,8 @@ private struct CadenzaEditorView: View {
             returnMeasure = String(passage.returnMeasure); returnBeat = String(passage.returnBeat)
         }
         func passage(index: Int) throws -> CadenzaPassage {
-            guard let sm = Int(startMeasure), let sb = Int(startBeat), let rm = Int(returnMeasure), let rb = Int(returnBeat) else {
-                throw MusicalError("Passage \(index + 1): choose whole measure and beat numbers.")
+            guard let sm = Int(startMeasure), let sb = Double(startBeat), let rm = Int(returnMeasure), let rb = Double(returnBeat) else {
+                throw MusicalError("Passage \(index + 1): choose whole measure numbers and numeric beats (for example, 1.5).")
             }
             return CadenzaPassage(startMeasure: sm, startBeat: sb, returnMeasure: rm, returnBeat: rb)
         }
@@ -286,7 +286,7 @@ private struct CadenzaEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Cadenza passages").font(.title2.weight(.semibold))
-            Text("Stop at the start beat. Press ArrowRight to resume at the return beat, with no count-in. Measures begin at 1; beats run from 1 to 4.")
+            Text("Enter free time at the start beat and let the orchestra’s release fade. Press ArrowRight to resume at the return beat, with no count-in. Measures begin at 1; beats run from 1 to 4, with decimals for subdivisions (1.5 = halfway through beat 1).")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -342,7 +342,7 @@ private struct CadenzaEditorView: View {
                     alert.alertStyle = .warning
                     alert.messageText = "Are you sure?"
                     let ranges = sounding.map { "Measure \($0.passage.startMeasure), beat \($0.passage.startBeat) → measure \($0.passage.returnMeasure), beat \($0.passage.returnBeat)" }.joined(separator: "\n")
-                    alert.informativeText = "Orchestral accompaniment is detected in the measures designated as the cadenza.\n\n\(ranges)\n\nSaving will skip this audio. Quiet noise or reverberation may also trigger this sound-level check. Cancel to revise the boundaries, or save anyway."
+                    alert.informativeText = "Orchestral accompaniment is detected in the measures designated as the cadenza.\n\n\(ranges)\n\nThe initial release can ring for up to three seconds, ending at the first quiet gap. Later audio is skipped. Quiet noise or reverberation may also trigger this sound-level check. Cancel to revise the boundaries, or save anyway."
                     alert.addButton(withTitle: "Cancel")
                     alert.addButton(withTitle: "Save anyway")
                     guard alert.runModal() == .alertSecondButtonReturn else { return }

@@ -84,13 +84,17 @@ extension InputCapture: FollowingInput {}
         let points = plan.waits + plan.freePassages.flatMap { [$0.start, $0.end] } + plan.cadenzas.flatMap { [$0.startQuarter, $0.returnQuarter] }
         let limits = Array(Set([0, position, prepared.end] + points.map { prep + midi.seconds(atQuarter: $0) }))
             .filter { $0 >= 0 && $0 <= prepared.end }.sorted()
-        let releases = Dictionary(uniqueKeysWithValues: plan.freePassages.compactMap { gap -> (Double, Double)? in
+        var releases = Dictionary(uniqueKeysWithValues: plan.freePassages.compactMap { gap -> (Double, Double)? in
             guard !plan.waits.contains(gap.start), !plan.cadenzas.contains(where: { $0.startQuarter == gap.start }) else { return nil }
             return (prep + midi.seconds(atQuarter: gap.start), prep + midi.seconds(atQuarter: gap.end))
         })
+        for passage in plan.cadenzas {
+            releases[prep + passage.startSeconds] = PreparedPerformance.cadenzaReleaseEnd(passage, timing: prepared.timing)
+        }
+        let releaseLimits = releases
         let segments = try await Task.detached(priority: .userInitiated) {
             try zip(limits, limits.dropFirst()).map { start, end in
-                try PreparedPerformance.makeSegment(source: prepared.source, timing: prepared.timing, position: start, end: end, ringOutUntil: releases[end])
+                try PreparedPerformance.makeSegment(source: prepared.source, timing: prepared.timing, position: start, end: end, ringOutUntil: releaseLimits[end])
             }
         }.value
         guard token == generation else { throw CancellationError() }
@@ -127,7 +131,9 @@ extension InputCapture: FollowingInput {}
         }
         let q = quarter(location)
         if let cadenza = plan.cadenzas.first(where: { abs($0.startQuarter - q) < 1e-7 }) {
-            audio.stop(); phase = .cadenza(cadenza); status = .cadenza
+            if !fromAccompaniment { audio.stop() }
+            clearCadenzaAnalysis()
+            phase = .cadenza(cadenza); status = .cadenza
             detail = "Right Arrow · orchestral entrance"; return
         }
         if let wait = plan.waits.first(where: { abs($0 - q) < 1e-7 && !approvedWaits.contains($0) }),
@@ -162,6 +168,7 @@ extension InputCapture: FollowingInput {}
                 try returnFromFree(range)
             case .cadenza(let passage):
                 // All automatic behavior inside the manually controlled cadenza is skipped.
+                clearCadenzaAnalysis()
                 approvedWaits.formUnion(plan!.waits.filter { $0 >= passage.startQuarter && $0 <= passage.returnQuarter })
                 tracker.reset(notes: plan!.notes, quarter: passage.returnQuarter)
                 audio?.setRate(1); tempo.reset(); try enter(at: seconds(passage.returnQuarter))
@@ -186,6 +193,13 @@ extension InputCapture: FollowingInput {}
         guard active, let audio, let prepared, let plan else { return }
         let now = clock(), delta = min(0.1, max(0, now - max(entered, lastTick))); lastTick = now
         guard capture.ready else { inputFailed(); return }
+        if case .cadenza = phase {
+            // Keep the meter fresh without interpreting arbitrary cadenza notes.
+            // Drain continuously so the pedal cannot release a backlog of old PCM.
+            level = capture.storage?.peak.load(ordering: .relaxed) ?? 0
+            _ = capture.storage?.stream?.drain()
+            return
+        }
         poll(now: now)
         do {
             switch phase {
@@ -251,6 +265,18 @@ extension InputCapture: FollowingInput {}
                 }
             }
         } catch { fail(error) }
+    }
+
+    private func clearCadenzaAnalysis() {
+        // Invalidate in-flight analysis as well as buffered input at both ends of
+        // manual free time. A late result must not reset the indicator or steer
+        // the newly cued orchestral return.
+        generation &+= 1; analyzing = false
+        analyzer = nil; analysisOrigin = nil; analysisSamples = 0
+        lastPitch = nil; lastObservation = clock()
+        _ = capture.storage?.stream?.drain()
+        droppedSamples = capture.storage?.stream?.dropped.load(ordering: .acquiring) ?? 0
+        diagnostics.audioDiscontinuity()
     }
 
     private func resetAnalysis() {

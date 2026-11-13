@@ -2,10 +2,10 @@ import Foundation
 
 public struct CadenzaPassage: Codable, Equatable, Sendable {
     public let startMeasure: Int
-    public let startBeat: Int
+    public let startBeat: Double
     public let returnMeasure: Int
-    public let returnBeat: Int
-    public init(startMeasure: Int, startBeat: Int, returnMeasure: Int, returnBeat: Int) {
+    public let returnBeat: Double
+    public init(startMeasure: Int, startBeat: Double, returnMeasure: Int, returnBeat: Double) {
         self.startMeasure = startMeasure; self.startBeat = startBeat
         self.returnMeasure = returnMeasure; self.returnBeat = returnBeat
     }
@@ -20,9 +20,9 @@ public struct CompiledCadenza: Equatable, Sendable {
 }
 
 public func compileCadenzas(_ passages: [CadenzaPassage], midi: MIDIFile, audioDuration: Double) throws -> [CompiledCadenza] {
-    func position(_ measure: Int, _ beat: Int, _ label: String) throws -> Double {
-        guard measure >= 1, (1...4).contains(beat) else {
-            throw MusicalError("\(label): choose a whole measure number and a whole beat from 1 to 4.")
+    func position(_ measure: Int, _ beat: Double, _ label: String) throws -> Double {
+        guard measure >= 1, beat.isFinite, beat >= 1, beat < 5 else {
+            throw MusicalError("\(label): choose a whole measure number and a beat from 1 up to (but not including) 5; decimals mark subdivisions.")
         }
         // Compute in floating point to avoid overflow from untrusted settings.
         let quarter = (Double(measure) - 1) * 4 + Double(beat) - 1

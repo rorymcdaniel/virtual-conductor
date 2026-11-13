@@ -518,6 +518,77 @@ final class SoloFollowingTests: XCTestCase {
         XCTAssertEqual(audio.played.last?.position, 4.5)
         XCTAssertEqual(audio.rates.last, 1)
     }
+    func testCadenzaPreservesReleaseTailButPedalReturnsAtPlannedTempo() async throws {
+        let input = FollowingTestInput(), audio = FollowingTestAudio(), base = try FollowingFixture.prepared()
+        // An eighth-note release, followed by a rendered quarter-second decay.
+        for i in 0..<2000 { base.source.floatChannelData![0][2000+i] = 0.1 * Float(2000-i)/2000 }
+        let prepared = try PreparedPerformance(midi: base.midi, source: base.source, preparation: 0,
+            passages: [CadenzaPassage(startMeasure: 1, startBeat: 1.5, returnMeasure: 3, returnBeat: 1)])
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: prepared.passages)
+        let following = LiveFollowing(capture: input, permission: { true })
+        defer { following.stop() }
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        let segment = try XCTUnwrap(audio.played.first)
+        XCTAssertEqual(segment.end, 0.75)
+        XCTAssertEqual(segment.clicks.frameLength, 6000)
+        XCTAssertGreaterThan(segment.music.frameLength, 8000)
+        XCTAssertEqual(segment.music.floatChannelData![0][7000], 0.05, accuracy: 0.0001)
+        let stops = audio.stops
+        audio.sourcePosition = segment.end; following.tick()
+        XCTAssertEqual(following.status, .cadenza)
+        XCTAssertEqual(audio.stops, stops, "The boundary must not stop the prepared release")
+        audio.sourcePosition = 10; following.tick()
+        XCTAssertEqual(following.position, segment.end, "The conducting clock stays in the cadenza while audio decays")
+        following.cue()
+        XCTAssertEqual(audio.played.last?.position, 4.5)
+        XCTAssertEqual(audio.rates.last, 1)
+    }
+
+    func testCadenzaDiscardsInFlightAnalysisBeforeAndAfterPedal() async throws {
+        for cueImmediately in [false, true] {
+            let input = FollowingTestInput(), audio = FollowingTestAudio()
+            let prepared = try FollowingFixture.prepared(cadenzas: [CadenzaPassage(startMeasure: 1, startBeat: 2, returnMeasure: 3, returnBeat: 1)])
+            var now = 0.0
+            let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+            defer { following.stop() }
+            let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: prepared.passages)
+            try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+            input.storage = CaptureStorage(rate: 8000, streaming: true)
+            for i in 0..<800 { input.storage?.stream?.write(Float(0.1 * sin(2 * .pi * 261.6256 * Double(i)/8000))) }
+            // Analysis is launched on the tick that enters the cadenza, then returns late.
+            audio.sourcePosition = 1; now = 1; following.tick(); now += 0.5
+            if cueImmediately { following.cue() }
+            try await Task.sleep(for: .milliseconds(100))
+            XCTAssertEqual(following.status, cueImmediately ? .following : .cadenza)
+            XCTAssertTrue(following.diagnostics.snapshot()!.0.decisions.isEmpty)
+            XCTAssertFalse(following.diagnostics.snapshot()!.0.notices.contains { $0.reason.contains("discontinuity") })
+            if !cueImmediately { following.cue() }
+            XCTAssertEqual(audio.played.last?.position, 4.5)
+        }
+    }
+
+    func testCadenzaDisplaySurvivesAudioDiscontinuityUntilPedal() async throws {
+        let input = FollowingTestInput(), audio = FollowingTestAudio()
+        let prepared = try FollowingFixture.prepared(cadenzas: [CadenzaPassage(startMeasure: 1, startBeat: 2, returnMeasure: 3, returnBeat: 1)])
+        var now = 0.0
+        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        defer { following.stop() }
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: prepared.passages)
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        // No recognized notes: losing the soloist in the lead-in cannot block this boundary.
+        audio.sourcePosition = 1; now = 2; following.tick()
+        XCTAssertEqual(following.status, .cadenza)
+        input.storage = CaptureStorage(rate: 8000, streaming: true)
+        for _ in 0..<2400 { input.storage?.stream?.write(0.1) }
+        now += 0.3; following.tick()
+        XCTAssertEqual(following.status, .cadenza, "Microphone recovery must not hide the manual cadenza")
+        XCTAssertEqual(following.position, 1)
+        XCTAssertEqual(audio.played.count, 1)
+        following.cue()
+        XCTAssertEqual(audio.played.last?.position, 4.5)
+        XCTAssertEqual(following.status, .following)
+    }
+
     func testCadenzaIgnoresMicrophoneAndInputLossStopsCapture() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio()
         let prepared = try FollowingFixture.prepared(cadenzas: [CadenzaPassage(startMeasure: 1, startBeat: 1, returnMeasure: 3, returnBeat: 1)])

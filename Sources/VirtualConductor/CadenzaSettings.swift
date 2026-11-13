@@ -88,8 +88,9 @@ final class CadenzaSettings {
         var ranges: [(Double, Double)] = []
         for (index, passage) in passages.enumerated() {
             guard passage.startMeasure >= 1, passage.returnMeasure >= 1,
-                  (1...4).contains(passage.startBeat), (1...4).contains(passage.returnBeat) else {
-                throw MusicalError("Passage \(index + 1): choose a whole measure number and a whole beat from 1 to 4.")
+                  passage.startBeat.isFinite, passage.startBeat >= 1, passage.startBeat < 5,
+                  passage.returnBeat.isFinite, passage.returnBeat >= 1, passage.returnBeat < 5 else {
+                throw MusicalError("Passage \(index + 1): choose a whole measure number and a beat from 1 up to (but not including) 5; decimals mark subdivisions.")
             }
             let start = (Double(passage.startMeasure) - 1) * 4 + Double(passage.startBeat) - 1
             let end = (Double(passage.returnMeasure) - 1) * 4 + Double(passage.returnBeat) - 1

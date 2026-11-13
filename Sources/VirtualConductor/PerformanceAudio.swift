@@ -25,7 +25,15 @@ final class PreparedPerformance {
         let end = timing.prepSeconds + max(Double(source.frameLength) / source.format.sampleRate, midi.duration)
         let starts = [0.0] + compiled.map { timing.prepSeconds + $0.returnSeconds }
         let ends = compiled.map { timing.prepSeconds + $0.startSeconds } + [end]
-        segments = try zip(starts, ends).map { try Self.makeSegment(source: source, timing: timing, position: $0, end: $1) }
+        segments = try zip(starts, ends).enumerated().map { index, bounds in
+            let release = index < compiled.count ? Self.cadenzaReleaseEnd(compiled[index], timing: timing) : nil
+            return try Self.makeSegment(source: source, timing: timing, position: bounds.0, end: bounds.1, ringOutUntil: release)
+        }
+    }
+    /// A cadenza may be placed in sounding audio: never play arbitrarily far into
+    /// the skipped passage when no quiet gap can be found.
+    static func cadenzaReleaseEnd(_ passage: CompiledCadenza, timing: PerformanceTiming) -> Double {
+        timing.prepSeconds + min(passage.returnSeconds, passage.startSeconds + 3)
     }
     static func load(_ url: URL) throws -> AVAudioPCMBuffer {
         let file = try AVAudioFile(forReading: url)
@@ -61,6 +69,16 @@ final class PreparedPerformance {
             let dest = music.floatChannelData![c]; dest.initialize(repeating: 0, count: Int(musicCount))
             let from = max(first, prepFrame), to = min(musicEnd, prepFrame + Int64(source.frameLength))
             if to > from { dest.advanced(by: Int(from-first)).update(from: source.floatChannelData![c].advanced(by: Int(from-prepFrame)), count: Int(to-from)) }
+        }
+        // Smooth the end of a release even when the safety limit, rather than
+        // silence, ended it. The logical cutoff and click buffer stay unchanged.
+        if musicEnd > last {
+            let fadeFrames = min(Int(rate * 0.01), Int(musicEnd - last))
+            for c in 0..<Int(source.format.channelCount) {
+                for i in 0..<fadeFrames {
+                    music.floatChannelData![c][Int(musicCount) - fadeFrames + i] *= Float(fadeFrames - 1 - i) / Float(max(1, fadeFrames - 1))
+                }
+            }
         }
         let dest = clicks.floatChannelData![0]; dest.initialize(repeating: 0, count: Int(count))
         for beat in 0..<timing.totalBeats {

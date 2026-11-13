@@ -18,6 +18,28 @@ final class SettingsBridgeTests: XCTestCase {
         return try MIDIFile(data: Data(contentsOf: url))
     }
 
+    func testFractionalBeatsRoundTripAndLegacyWholeBeatsStillLoad() throws {
+        let score = try midi()
+        try withStore { store, file in
+            let legacy = Data("{\"schemaVersion\":1,\"midiSHA256\":\"\(fingerprint)\",\"passages\":[{\"startMeasure\":1,\"startBeat\":2,\"returnMeasure\":2,\"returnBeat\":1}]}".utf8)
+            XCTAssertEqual(try store.importBridge(data: legacy, fingerprint: fingerprint, midi: score, audioDuration: 10), [passage])
+            let fractional = CadenzaPassage(startMeasure: 1, startBeat: 1.5, returnMeasure: 1, returnBeat: 4.75)
+            let compiled = try compileCadenzas([fractional], midi: score, audioDuration: 10)
+            XCTAssertEqual(compiled[0].startQuarter, 0.5)
+            XCTAssertEqual(compiled[0].returnQuarter, 3.75)
+            XCTAssertEqual(compiled[0].startSeconds, score.seconds(atQuarter: 0.5))
+            let bridge = try store.exportBridge([fractional], fingerprint: fingerprint)
+            XCTAssertEqual(try store.importBridge(data: bridge, fingerprint: fingerprint, midi: score, audioDuration: 10), [fractional])
+            XCTAssertEqual(try CadenzaSettings(fileURL: file).load(fingerprint: fingerprint), [fractional])
+            for beat in [Double.nan, .infinity, -.infinity, 0.99, 5] {
+                let invalid = CadenzaPassage(startMeasure: 1, startBeat: beat, returnMeasure: 2, returnBeat: 1)
+                XCTAssertThrowsError(try compileCadenzas([invalid], midi: score, audioDuration: 10))
+                XCTAssertThrowsError(try store.save([invalid], fingerprint: fingerprint))
+            }
+            XCTAssertEqual(try store.load(fingerprint: fingerprint), [fractional])
+        }
+    }
+
     func testSettingsPersistPerExactFingerprintAndEmptySaveRemovesPassages() throws {
         try withStore { store, file in
             XCTAssertEqual(try store.load(fingerprint: fingerprint), [])

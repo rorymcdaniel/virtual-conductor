@@ -219,9 +219,9 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         if following.active { following.tick(); return }
         guard state == .running, let prepared else { return }
         if PerformanceAudio.hostSeconds - audio.audibleOrigin >= segmentEnd {
-            position = segmentEnd; audio.stop()
+            position = segmentEnd
             if passageIndex < prepared.passages.count { state = .waiting; message = "Cadenza — press ArrowRight at the orchestral entrance." }
-            else { state = .finished; message = "Finished." }
+            else { audio.stop(); state = .finished; message = "Finished." }
         }
     }
     func pause() { advanceBoundary(); if state == .running { position = elapsed(); run &+= 1; following.stop(); audio.stop(); state = .paused } }
@@ -239,7 +239,10 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
             do {
                 let segment: AudioSegment
                 if abs(start-prepared.segments[index].position) < 1e-8 { segment = prepared.segments[index] }
-                else { segment = try await Task.detached { try PreparedPerformance.makeSegment(source:prepared.source,timing:prepared.timing,position:start,end:end) }.value }
+                else {
+                    let release = index < prepared.passages.count ? PreparedPerformance.cadenzaReleaseEnd(prepared.passages[index], timing: prepared.timing) : nil
+                    segment = try await Task.detached { try PreparedPerformance.makeSegment(source:prepared.source,timing:prepared.timing,position:start,end:end,ringOutUntil:release) }.value
+                }
                 guard token == run else { return }
                 try begin(segment,immediate:false)
             } catch { guard token == run else { return }; state = .paused; message = error.localizedDescription }
