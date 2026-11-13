@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A musician’s guide to what went wrong with Virtual Conductor’s beat detection, what changed, and what the tests show.">
+  <title>How Virtual Conductor learned to listen more carefully</title>
+  <style>
+    :root { color-scheme: light; --paper:#fffdf8; --bg:#f3f1e9; --ink:#233a33; --muted:#52665d; --green:#27634d; --pale:#e7efe6; --rust:#98472f; --rose:#f5e8e1; --line:#d4dbcf; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:17px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { max-width:1040px; margin:44px auto; padding:64px 76px 36px; background:var(--paper); border-top:6px solid var(--green); }
+    .eyebrow, .section-number { font-size:12px; font-weight:700; letter-spacing:.15em; text-transform:uppercase; color:var(--green); }
+    .eyebrow { display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+    h1,h2,h3,p { margin-top:0; }
+    h1,h2 { font-family:Georgia,"Times New Roman",serif; font-weight:400; line-height:1.12; letter-spacing:-.025em; }
+    h1 { max-width:750px; font-size:clamp(38px,5.4vw,60px); margin:24px 0; }
+    h2 { font-size:34px; margin:9px 0 22px; }
+    h3 { font-size:19px; line-height:1.35; margin-bottom:10px; }
+    p { margin-bottom:18px; }
+    .lead { font-size:21px; line-height:1.55; max-width:730px; }
+    .intro { color:var(--muted); max-width:740px; }
+    section { margin-top:44px; padding-top:34px; border-top:1px solid var(--line); }
+    strong { font-weight:650; }
+    .principle { margin:26px 0 0; padding:18px 23px; background:var(--pale); border-left:3px solid var(--green); font-size:18px; }
+    .principle p { margin:0; }
+    figure { margin:26px 0 0; }
+    .listening { padding:24px; background:#f2f2eb; border-radius:8px; }
+    .phrase-row { display:grid; grid-template-columns:135px 1fr; align-items:center; gap:16px; margin:14px 0; }
+    .row-label { font-size:14px; font-weight:650; line-height:1.35; }
+    .row-label small { display:block; margin-top:4px; font-size:12px; font-weight:400; color:var(--muted); }
+    .notes { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); gap:7px; }
+    .note { display:grid; place-items:center; height:42px; border-radius:5px; background:var(--green); color:white; font:600 18px Georgia,serif; }
+    .played .note { background:transparent; color:var(--ink); border:1px solid #8c9e90; }
+    .held { grid-column:1/-1; padding:9px 14px; border-radius:5px; color:var(--rust); background:var(--rose); text-align:center; font-size:14px; }
+    figcaption { margin-top:13px; font-size:13px; line-height:1.5; color:var(--muted); }
+    .findings { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:25px; margin-top:29px; }
+    .finding { border-top:3px solid var(--line); padding-top:17px; }
+    .finding p { font-size:15px; line-height:1.6; }
+    .finding .change { color:var(--green); margin-bottom:0; }
+    .shared { margin-top:25px; padding:22px 26px; background:var(--pale); text-align:center; }
+    .shared h3 { margin:0 0 5px; }
+    .shared p { margin:0; font-size:15px; }
+    .uses { display:grid; grid-template-columns:1fr 1fr; gap:30px; margin-top:24px; }
+    .use { padding-top:14px; border-top:2px solid var(--green); }
+    .use .timing { color:var(--green); font-size:12px; letter-spacing:.1em; font-weight:700; text-transform:uppercase; }
+    .use p { margin-bottom:0; font-size:16px; }
+    .recovery { margin-top:26px; font-size:16px; }
+    .evidence { display:grid; grid-template-columns:1fr 1fr; gap:30px; margin:26px 0; }
+    .stat { border-top:1px solid var(--line); padding-top:17px; }
+    .stat .value { display:block; font:400 40px/1.2 Georgia,serif; color:var(--green); margin-bottom:9px; }
+    .stat h3 { font-size:16px; margin-bottom:6px; }
+    .stat p { font-size:14px; margin-bottom:0; }
+    .note-text { font-size:15px; color:var(--muted); }
+    .limits { padding:24px 27px; background:#efeee6; }
+    .limits h3 { font-size:19px; }
+    .limits p { margin:0; font-size:16px; }
+    footer { margin-top:35px; padding-top:19px; border-top:1px solid var(--line); display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap; font-size:12px; color:var(--muted); }
+    a { color:var(--green); text-underline-offset:3px; }
+    a:focus-visible { outline:2px solid var(--green); outline-offset:4px; }
+    @media(max-width:760px) {
+      body { font-size:16px; }
+      main { margin:0; padding:35px 25px 25px; }
+      h2 { font-size:29px; }
+      .lead { font-size:19px; }
+      .findings { grid-template-columns:1fr; gap:23px; }
+      .finding p { font-size:16px; }
+      .phrase-row { grid-template-columns:1fr; gap:8px; margin:21px 0; }
+      .row-label small { display:inline; margin-left:6px; }
+      .listening { padding:10px 17px; }
+      .uses,.evidence { gap:22px; }
+      .stat .value { font-size:32px; }
+    }
+    @media(max-width:440px) {
+      main { padding:29px 20px 22px; }
+      .uses,.evidence { grid-template-columns:1fr; }
+      .notes { gap:4px; }
+      .note { height:35px; }
+      .shared,.limits { padding:20px; }
+    }
+    @media print {
+      @page { size:A4; margin:16mm; }
+      body { background:white; font-size:10.5pt; line-height:1.5; }
+      main { margin:0; max-width:none; padding:16px 0 0; border-top-width:3px; }
+      h1 { font-size:34pt; } h2 { font-size:23pt; } .lead { font-size:14pt; }
+      section { margin-top:25px; padding-top:22px; }
+      .findings { grid-template-columns:repeat(3,1fr); gap:16px; }
+      .finding p,.use p,.limits p { font-size:10pt; }
+      .listening,.shared,.limits,.finding,.stat,.use { break-inside:avoid; }
+      h2,h3,.section-number { break-after:avoid; }
+      p { orphans:3; widows:3; }
+      .listening,.shared,.limits,.note,.held { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+      footer { font-size:9pt; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow"><span>Virtual Conductor · A musician’s guide</span><span>November 12, 2026</span></div>
+    <h1>Learning to listen<br>more carefully.</h1>
+    <p class="lead">The clearest failures were happening before the app could make a useful tempo decision: it was losing some attacks, joining others together, and overlooking quiet playing.</p>
+    <p class="intro">This update repairs that listening stage in both <strong>Live following</strong> and <strong>Record interpretation</strong>. Here is what we found, why it mattered musically, and how we checked the improvements.</p>
+  </header>
+
+  <section aria-labelledby="goal">
+    <span class="section-number">01 · The musical goal</span>
+    <h2 id="goal">Find the pace of the phrase.</h2>
+    <p>Your premise is right: the accompaniment needs enough evidence to understand your pace. An occasional wrong or missed note should not prevent that. The score gives the app context: the same sequence of attacks could be quarters, eighths, or triplets, each implying a different tempo.</p>
+    <p>The app therefore uses recognizable notes in the solo phrase to locate you in the score, then estimates pace from their timing. Beats inside held notes or between attacks are inferred from the surrounding phrase.</p>
+    <div class="principle"><p><strong>Notes provide landmarks.</strong> The purpose of recognizing them is to understand where you are and how quickly you are moving through the music.</p></div>
+  </section>
+
+  <section aria-labelledby="failures">
+    <span class="section-number">02 · What was going wrong</span>
+    <h2 id="failures">Eight notes could become one.</h2>
+    <p>In a repeatable recording test, eight separately articulated Cs were interpreted as one long C. The short gaps between attacks were being smoothed away. That removed the very information needed to estimate the player’s tempo.</p>
+    <figure>
+      <div class="listening" role="img" aria-label="Illustration of a repeated-note test. The player performs eight separate Cs. Before the fix, recording analysis reports one held C. After the fix, it retains eight separate notes.">
+        <div class="phrase-row played" aria-hidden="true"><div class="row-label">You played</div><div class="notes"><span class="note">C</span><span class="note">C</span><span class="note">C</span><span class="note">C</span><span class="note">C</span><span class="note">C</span><span class="note">C</span><span class="note">C</span></div></div>
+        <div class="phrase-row" aria-hidden="true"><div class="row-label">Before <small>Recording analysis</small></div><div class="notes"><span class="held">One apparently held C</span></div></div>
+        <div class="phrase-row" aria-hidden="true"><div class="row-label">After <small>The same test</small></div><div class="notes"><span class="note">C</span><span class="note">C</span><span class="note">C</span><span class="note">C</span><span class="note">C</span><span class="note">C</span><span class="note">C</span><span class="note">C</span></div></div>
+      </div>
+      <figcaption>Illustration of the reproduced failure and its corrected result. These are note events, not a waveform or a promise that every articulation will be recognized.</figcaption>
+    </figure>
+    <div class="findings">
+      <article class="finding"><h3>Repeated notes blurred together</h3><p>Recording analysis treated short separations between the same pitch as part of a continuous note.</p><p class="change"><strong>Changed:</strong> keep those articulations so they can serve as timing landmarks.</p></article>
+      <article class="finding"><h3>Fast phrases lost attacks</h3><p>Live audio sometimes arrived in groups. The app looked only at the end of each group, skipping events in between.</p><p class="change"><strong>Changed:</strong> examine the full sequence and preserve when each event occurred.</p></article>
+      <article class="finding"><h3>Quiet playing disappeared</h3><p>A fixed loudness cutoff rejected a clean, quiet test phrase before its pitches could be recognized.</p><p class="change"><strong>Changed:</strong> admit quieter musical signals while continuing to check whether the sound has a clear pitch.</p></article>
+    </div>
+  </section>
+
+  <section aria-labelledby="solution">
+    <span class="section-number">03 · What changed</span>
+    <h2 id="solution">A shared way of listening.</h2>
+    <p>The two features previously used different listening code. They now share the improved analysis, so an improvement in recognizing an attack benefits both. Timing follows the recorded sound itself, rather than the moments when the app happens to check for new audio.</p>
+    <div class="shared"><h3>Your playing → recognizable attacks and their timing</h3><p>One shared listening stage supplies two different jobs.</p></div>
+    <div class="uses">
+      <article class="use"><span class="timing">While you play</span><h3>Live following</h3><p>Uses the phrase to estimate your current pace and guide accompaniment within your configured tempo tolerance. Free passages and explicit wait points retain their existing roles.</p></article>
+      <article class="use"><span class="timing">After you play</span><h3>Record interpretation</h3><p>Uses the captured phrase to propose a map of beat times for review and accompaniment playback.</p></article>
+    </div>
+    <p class="recovery"><strong>Recovery also matters.</strong> If audio delivery is interrupted, the app now resets its timing without treating an already-held note as a new entrance. That protects wait points from an accidental orchestral release.</p>
+  </section>
+
+  <section aria-labelledby="evidence">
+    <span class="section-number">04 · What the tests tell us</span>
+    <h2 id="evidence">The original failure cases now pass.</h2>
+    <p>I generated musical phrases with known note and beat times, reproduced the failures, and ran the same phrases through the corrected app. The broader checks include repeated notes, legato, quiet playing, vibrato, an occasional wrong note, and simulated headphone leakage.</p>
+    <div class="evidence">
+      <article class="stat"><span class="value">Within 40 ms</span><h3>Beat timing in the generated tests</h3><p>The estimated beat times stayed within four hundredths of a second of the known performance times.</p></article>
+      <article class="stat"><span class="value">8.3 s → 0.025 s</span><h3>Substantial processing headroom</h3><p>The release build analyzed 8.3 seconds of audio in about 0.025 seconds on this Mac. This measures computation, not microphone-to-speaker delay.</p></article>
+    </div>
+    <p class="note-text">The full suite reported 116 tests with zero failures and one opt-in hardware check skipped. A further release run passed 25 focused checks. Review also caught the interruption-recovery issues described above; regression tests now cover them.</p>
+    <div class="limits"><h3>The next evidence comes from playing.</h3><p>These results establish concrete improvements on controlled signals. Real horn attacks, room sound, microphone gain, and headphone bleed can still challenge the listener. Strong pitched background sound and ambiguous phrases remain limitations. Reliability comparable to SmartMusic or Cadenza has not been demonstrated by these tests.</p></div>
+  </section>
+
+  <footer>
+    <span>High-level explanation of the November 12 beat-detection update.</span>
+    <span><a href="https://github.com/rorymcdaniel/virtual-conductor/pull/7">Merged change · PR #7</a></span>
+  </footer>
+</main>
+</body>
+</html>
