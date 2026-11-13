@@ -224,11 +224,17 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
             else { audio.stop(); state = .finished; message = "Finished." }
         }
     }
-    func pause() { advanceBoundary(); if state == .running { position = elapsed(); run &+= 1; following.stop(); audio.stop(); state = .paused } }
+    func pause() {
+        advanceBoundary()
+        // The conducting clock already waits here, but its release may still
+        // sound. Silence it without losing the pending pedal return.
+        if state == .waiting { audio.stop(); return }
+        if state == .running { position = elapsed(); run &+= 1; following.stop(); audio.stop(); state = .paused }
+    }
     func toggle() {
         guard !shortcutsBlocked, !outputMissing else { return }
         advanceBoundary()
-        if state == .running { pause(); return }
+        if state == .running || state == .waiting { pause(); return }
         guard let prepared, [.ready,.paused,.finished].contains(state) else { return }
         if state == .finished { reset() }
         if scorePreparation.following.enabled { startFollowing(prepared); return }

@@ -24,7 +24,8 @@ The cadenza indicator must remain stable despite microphone analysis recovery.
   after the boundary while clicks stop there. It ends after 50 milliseconds below
   the quiet threshold on every channel, at the configured return, or after three
   seconds of source audio, whichever comes first. A short end fade avoids an abrupt
-  cutoff if the limit is reached. An early pedal cue stops any remaining tail.
+  cutoff if the limit is reached. An early pedal cue stops any remaining tail. Space or application
+  suspension also silences a fixed-playback tail while preserving the pedal wait.
 - This is a bounded release allowance, not source separation. New orchestral
   notes before the first quiet gap could also sound. The existing audio warning
   remains, with wording explaining this behavior. Place starts at actual releases.
@@ -54,3 +55,9 @@ fractional setting persistence and legacy integer imports, exact return position
 planned return tempo, release preservation, quiet-gap termination, a continuously
 sounding recording's three-second cap, and resumed lead-in buffers. Synthetic
 checks cannot replace a fresh horn rehearsal of the musical handoff.
+
+An opt-in output-device regression (`VC_DEVICE_CHECK=1 swift test --filter
+DeviceBindingTests/testPausingCadenzaReleasePreservesPedalReturnOnThisMac`) uses
+muted output to verify pause, Space, and suspension silence an actively scheduled
+release while retaining the correct pedal return. It reproduced all three
+failures before the transport fix.
