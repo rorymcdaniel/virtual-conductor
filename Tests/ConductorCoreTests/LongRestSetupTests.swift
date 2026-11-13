@@ -5,6 +5,13 @@ import ConductorCore
 @testable import VirtualConductor
 
 final class LongRestSetupTests: XCTestCase {
+    private let suite = "ScorePreparationTests." + UUID().uuidString
+    private lazy var defaults = UserDefaults(suiteName: suite)!
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suite)
+        super.tearDown()
+    }
+
     private func fixture(_ name: String) -> URL {
         Bundle.module.url(forResource: name, withExtension: "musicxml", subdirectory: "Fixtures")!
     }
@@ -85,7 +92,7 @@ final class LongRestSetupTests: XCTestCase {
         XCTAssertEqual(score.staves[0].notes, [MIDINote(pitch: 47, startQuarter: 0, endQuarter: 8)])
     }
     func testStaffAndThresholdRebuildOnlySelectedSchedule() throws {
-        var score = ScorePreparation(), rests = LongRestSetup()
+        var score = ScorePreparation(defaults: defaults), rests = LongRestSetup()
         let token = score.beginLoading(); score.finishLoading(try loaded("long-rest-voices-and-staves"), generation: token)
         XCTAssertNil(score.selectedStaffID)
         XCTAssertGreaterThan(score.staves.count, 1)
@@ -99,7 +106,7 @@ final class LongRestSetupTests: XCTestCase {
         XCTAssertNil(score.selectedStaffID); XCTAssertNil(rests.schedule)
     }
     func testEightMeasureThresholdBoundaryAndNoAutomaticSelection() throws {
-        var score = ScorePreparation(), rests = LongRestSetup()
+        var score = ScorePreparation(defaults: defaults), rests = LongRestSetup()
         let token = score.beginLoading(); score.finishLoading(try loaded(), generation: token)
         XCTAssertNil(score.selectedStaffID)
         score.selectStaff(score.staves[0].id); rests.update(from: score)
@@ -108,19 +115,19 @@ final class LongRestSetupTests: XCTestCase {
         rests.setThreshold(8, preparation: score); XCTAssertEqual(rests.schedule?.runs.count, 1)
     }
     func testReplacementClearsSameStaffIDAndStaleResultsCannotRestoreIt() throws {
-        var setup = ScorePreparation()
+        var setup = ScorePreparation(defaults: defaults)
         let first = setup.beginLoading(); setup.finishLoading(try loaded(), generation: first)
         setup.selectStaff(setup.staves[0].id)
         let stale = setup.beginLoading(), current = setup.beginLoading()
         XCTAssertNil(setup.score); XCTAssertNil(setup.selectedStaffID)
-        setup.finishLoading(try loaded(identity: URL(fileURLWithPath: "/other.mscz")), generation: current)
+        setup.finishLoading(try loaded("long-rest-separated-runs", identity: URL(fileURLWithPath: "/other.mscz")), generation: current)
         XCTAssertNil(setup.selectedStaffID)
         setup.finishLoading(try loaded(), generation: stale)
         XCTAssertNil(setup.selectedStaffID)
         setup.failLoading(generation: stale); XCTAssertFalse(setup.staves.isEmpty)
     }
     func testRereadAndKeptTimingRetainSelectionButBarePairClearsIt() throws {
-        var setup = ScorePreparation()
+        var setup = ScorePreparation(defaults: defaults)
         let first = setup.beginLoading(); setup.finishLoading(try loaded(), generation: first)
         let id = setup.staves[0].id; setup.selectStaff(id)
         let reread = setup.beginLoading(); setup.finishLoading(try loaded(), generation: reread)
@@ -160,7 +167,7 @@ final class LongRestSetupTests: XCTestCase {
         let original = try String(contentsOf: fixture("long-rest-eight-measures"), encoding: .utf8)
         try original.write(to: xml, atomically: true, encoding: .utf8)
         let midi = try MIDIFile(data: midiData(attacks: [34.5], end: 36))
-        var setup = ScorePreparation()
+        var setup = ScorePreparation(defaults: defaults)
         let first = setup.beginLoading()
         setup.finishLoading(.init(musicXML: xml, identity: xml, midi: midi, midiFingerprint: "test"), generation: first)
         let id = setup.staves[0].id; setup.selectStaff(id)
@@ -208,7 +215,7 @@ final class LongRestSetupTests: XCTestCase {
         // Existing flat JSON, from before free passages were introduced.
         let legacy = #"{"enabled":true,"solo":{"partID":"Piano","staffNumber":2},"waits":[{"measure":1,"beat":1.5}]}"#
         defaults.set(Data(legacy.utf8), forKey: key)
-        let model = PerformanceModel(followingDefaults: defaults)
+        let model = PerformanceModel(defaults: defaults)
         model.outputMissing = true
         model.load(midi: midi, wav: wav, musicXML: xml)
         while model.state == .loading { await Task.yield() }
@@ -225,13 +232,28 @@ final class LongRestSetupTests: XCTestCase {
         draft.waits = [WaitPoint(measure: 2, beat: 1)]
         XCTAssertThrowsError(try model.saveFollowing(draft, tolerance: .nan))
         XCTAssertEqual(model.longRestSetup.schedule?.staffID, saved)
-        try model.saveFollowing(draft, tolerance: 15)
+        let microphone = AudioDevice(id: 701, uid: "test-usb-mic", name: "Test USB mic", input: true, output: false)
+        model.devices = [microphone]
+        try model.saveFollowing(draft, tolerance: 15, inputID: microphone.id)
         XCTAssertEqual(model.longRestSetup.schedule?.staffID, other)
         XCTAssertEqual(try model.followingPlan().waits, [4])
         XCTAssertEqual(try model.followingPlan().notes.map(\.pitch), [74])
         let stored = try JSONDecoder().decode(FollowingConfiguration.self, from: XCTUnwrap(defaults.data(forKey: key)))
         XCTAssertEqual(stored.solo, other)
         XCTAssertEqual(stored.waits, draft.waits)
+
+        let relaunched = PerformanceModel(defaults: defaults)
+        relaunched.outputMissing = true
+        relaunched.restoreRehearsal()
+        while relaunched.state == .loading { await Task.yield() }
+        XCTAssertEqual(relaunched.state, .ready)
+        XCTAssertEqual(relaunched.midiURL, midi.standardizedFileURL)
+        XCTAssertEqual(relaunched.longRestSetup.schedule?.staffID, other)
+        XCTAssertEqual(try relaunched.followingPlan().waits, [4])
+        XCTAssertEqual(relaunched.following.tolerance, 15)
+        XCTAssertEqual(relaunched.followingInputID(), 0) // A missing explicit input must not fall back to the system microphone.
+        relaunched.devices = [AudioDevice(id: 702, uid: microphone.uid, name: microphone.name, input: true, output: false)]
+        XCTAssertEqual(relaunched.followingInputID(), 702) // Core Audio can assign a new numeric ID after a restart.
 
         model.selectSoloStaff(saved)
         XCTAssertEqual(model.longRestSetup.schedule?.staffID, saved)
@@ -272,12 +294,16 @@ final class LongRestSetupTests: XCTestCase {
         let suite = "ScorePreparationTests." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let model = PerformanceModel(followingDefaults: defaults); model.outputMissing = true
+        let store = CadenzaSettings(fileURL: directory.appendingPathComponent("cadenzas.json"))
+        let model = PerformanceModel(defaults: defaults, cadenzaSettings: store); model.outputMissing = true
         let xml = fixture("long-rest-eight-measures")
         model.load(midi: midi, wav: wav, musicXML: xml, scoreIdentity: directory)
         while model.state == .loading { await Task.yield() }
         XCTAssertEqual(model.state, .ready)
         let id = try XCTUnwrap(model.scorePreparation.staves.first?.id)
+        let cadenza = CadenzaPassage(startMeasure: 2, startBeat: 1, returnMeasure: 3, returnBeat: 1)
+        try model.commitPassages([cadenza])
+        while model.state == .loading { await Task.yield() }
         var draft = model.scorePreparation.following
         draft.solo = id; draft.enabled = true
         draft.waits = [WaitPoint(measure: 9, beat: 3.5)]
@@ -299,6 +325,14 @@ final class LongRestSetupTests: XCTestCase {
         XCTAssertEqual(model.prepared?.midi.openingBPM, 80)
         XCTAssertFalse(model.scorePreparation.following.enabled)
         XCTAssertTrue(model.scorePreparation.following.waits.isEmpty)
+        let relaunched = PerformanceModel(defaults: defaults, cadenzaSettings: store)
+        relaunched.outputMissing = true
+        relaunched.restoreRehearsal()
+        while relaunched.state == .loading { await Task.yield() }
+        XCTAssertEqual(relaunched.state, .ready)
+        XCTAssertEqual(relaunched.midiURL, keptMIDI.standardizedFileURL)
+        XCTAssertEqual(relaunched.longRestSetup.schedule?.staffID, id)
+        XCTAssertEqual(relaunched.passages, [cadenza])
         model.load(midi: midi, wav: wav, musicXML: fixture("long-rest-eight-measures"), scoreIdentity: directory)
         model.load(midi: midi, wav: wav)
         while model.state == .loading { await Task.yield() }

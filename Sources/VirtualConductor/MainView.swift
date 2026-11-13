@@ -118,7 +118,7 @@ struct MainView: View {
                 Slider(value: $model.volume, in: 0...1).frame(width: 110).accessibilityLabel("Playback volume")
             }
             HStack(spacing: 10) {
-                Picker("Audio output", selection: $model.outputID) {
+                Picker("Audio output", selection: Binding(get: { model.outputID }, set: { model.outputID = $0; model.chooseOutput(remember: true) })) {
                     if !outputs.contains(where: { $0.id == model.outputID }) {
                         Text(model.outputID == 0 ? "Choose output" : "Selected output unavailable").tag(model.outputID)
                     }
@@ -126,8 +126,7 @@ struct MainView: View {
                 }
                 .frame(maxWidth: 380)
                 .disabled(model.locked)
-                .onChange(of: model.outputID) { _, _ in model.chooseOutput() }
-                Button("Reconnect", action: model.chooseOutput)
+                Button("Reconnect") { model.chooseOutput(remember: true) }
                     .disabled(model.locked || !outputs.contains(where: { $0.id == model.outputID }))
                     .help("Explicitly reconnect the selected output after an interruption")
                 Button("Test output", action: model.testOutput).disabled(model.locked || model.outputMissing)

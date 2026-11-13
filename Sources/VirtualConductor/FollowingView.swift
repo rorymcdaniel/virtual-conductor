@@ -85,12 +85,12 @@ struct FollowingView: View {
                 Button("Cancel") { model.followingOpen = false }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save and reset") {
-                    do { try model.saveFollowing(values, tolerance: tolerance); model.following.inputID = inputID }
+                    do { try model.saveFollowing(values, tolerance: tolerance, inputID: inputID) }
                     catch { self.error = error.localizedDescription }
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: 620)
-            .onAppear { values = model.scorePreparation.following; tolerance = model.following.tolerance; inputID = model.following.inputID }
+            .onAppear { values = model.scorePreparation.following; tolerance = model.following.tolerance; inputID = model.followingInputID() }
     }
     private var freeEditor: some View {
         VStack(alignment: .leading, spacing: 10) {

@@ -36,6 +36,7 @@ struct RecordedTake {
     private var playbackDuration = 0.0
     private let capture = InputCapture()
     private let audio: PerformanceAudio
+    private let defaults: UserDefaults
     private let permission: () async -> Bool
     private let copySamples: (CaptureStorage) async -> [Float]
     private var midi: MIDIFile?
@@ -47,11 +48,11 @@ struct RecordedTake {
     private var recordRange: PassageRange?
     private var timer: Timer?
     private var analysis: Task<Void,Never>?
-    init(audio: PerformanceAudio, permission: @escaping () async -> Bool = { await AVCaptureDevice.requestAccess(for:.audio) }, copySamples: @escaping (CaptureStorage) async -> [Float] = { storage in await Task.detached {
+    init(audio: PerformanceAudio, defaults: UserDefaults = .standard, permission: @escaping () async -> Bool = { await AVCaptureDevice.requestAccess(for:.audio) }, copySamples: @escaping (CaptureStorage) async -> [Float] = { storage in await Task.detached {
             while storage.receiving.load(ordering:.acquiring) { await Task.yield() }
             return Array(UnsafeBufferPointer(start:storage.samples,count:storage.count.load(ordering:.acquiring)))
         }.value }) {
-        self.audio = audio; self.permission = permission; self.copySamples = copySamples
+        self.audio = audio; self.defaults = defaults; self.permission = permission; self.copySamples = copySamples
         capture.interrupted = { [weak self] in self?.captureInterrupted() }
         timer = Timer.scheduledTimer(withTimeInterval:0.04,repeats:true) { [weak self] _ in Task { @MainActor in self?.update() } }
     }
@@ -63,10 +64,25 @@ struct RecordedTake {
         let horns = tracks.indices.filter { tracks[$0].name.range(of:"horn|валторн",options:[.regularExpression,.caseInsensitive]) != nil && tracks[$0].notes > 3 && tracks[$0].noteEvents.first?.startQuarter == 0 }
         trackIndex = horns.count == 1 ? horns[0] : -1
     }
-    func open() { visible = true; inputs = (try? AudioDevices.list().filter(\.input)) ?? [] }
+    func open() {
+        visible = true
+        inputs = (try? AudioDevices.list().filter(\.input)) ?? []
+        if let uid = defaults.string(forKey: "recording-input-uid") {
+            inputID = inputs.first(where: { $0.uid == uid })?.id ?? Self.unavailableInputID
+        }
+    }
+    static let unavailableInputID = UInt32.max
     func enableInput() {
         guard !recording, !busy, !finalizing else { return }
         inputs = (try? AudioDevices.list().filter(\.input)) ?? inputs
+        if let uid = defaults.string(forKey: "recording-input-uid") {
+            guard let input = inputs.first(where: { $0.uid == uid }) else {
+                inputID = Self.unavailableInputID
+                message = "The selected recording input is unavailable. Reconnect it or choose another input."
+                return
+            }
+            inputID = input.id
+        }
         generation &+= 1; let token = generation; busy = true; stopPlayback()
         Task {
             let granted = await permission()
@@ -77,7 +93,13 @@ struct RecordedTake {
             catch { inputReady = false; message = error.localizedDescription }
         }
     }
-    func changeInput() { generation &+= 1; capture.release(); inputReady = false; busy = finalizing; level = 0 }
+    func selectInput(_ id: UInt32) {
+        if id == 0 { defaults.removeObject(forKey: "recording-input-uid") }
+        else if let input = inputs.first(where: { $0.id == id }) { defaults.set(input.uid, forKey: "recording-input-uid") }
+        else { return }
+        inputID = id
+        generation &+= 1; capture.release(); inputReady = false; busy = finalizing; level = 0
+    }
     func record() {
         guard !busy, !recording, let midi else { return }
         do {

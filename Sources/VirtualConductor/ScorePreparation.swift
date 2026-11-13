@@ -139,6 +139,7 @@ struct ScorePreparation {
                loaded.document == previous.source.document || loaded.keptTiming,
                score.staves == previous.source.score?.staves, score.measures == previous.source.score?.measures {
                 following.solo = previous.following.solo
+                if loaded.settingsKey != previous.source.settingsKey { persist(following, key: loaded.settingsKey) }
             }
             if !score.staves.contains(where: { $0.id == following.solo }) {
                 following.solo = nil
@@ -155,6 +156,7 @@ struct ScorePreparation {
     mutating func selectStaff(_ id: MusicXMLStaffID?) {
         guard var context = accepted else { return }
         context.following.solo = validStaff(id)
+        persist(context.following, key: context.source.settingsKey)
         state = .accepted(context)
     }
 
@@ -166,6 +168,10 @@ struct ScorePreparation {
         defaults.set(data, forKey: context.source.settingsKey)
         context.following = values
         state = .accepted(context)
+    }
+
+    private func persist(_ values: FollowingConfiguration, key: String) {
+        if let data = try? JSONEncoder().encode(values) { defaults.set(data, forKey: key) }
     }
 
     private func validStaff(_ id: MusicXMLStaffID?) -> MusicXMLStaffID? {
