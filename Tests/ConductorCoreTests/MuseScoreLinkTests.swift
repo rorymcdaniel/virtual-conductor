@@ -20,7 +20,7 @@ import ConductorCore
         XCTAssertThrowsError(try MuseScoreLink.points(beats: [BeatTime(quarter: 0,time: 0), BeatTime(quarter: 1,time: 1)], range: PassageRange(start: 1,end: 2), midi: midi(), duration: 2))
     }
     func testLinkedRefreshRetainsRecordingAndTiming() throws {
-        let model = RecordingModel(audio: PerformanceAudio())
+        let model = RecordingModel(audio: PerformanceAudio(), library: TakeLibrary(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
         let score = try midi()
         model.setScore(score, fingerprint: "before")
         model.take = RecordedTake(samples: [0.1,0.2], sampleRate: 2, range: PassageRange(start: 0,end: 1))

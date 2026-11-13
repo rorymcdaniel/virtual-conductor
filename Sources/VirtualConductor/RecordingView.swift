@@ -26,6 +26,20 @@ struct RecordingView: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    if !model.savedTakes.isEmpty {
+                        HStack {
+                            Picker("Saved takes for this score", selection: Binding(get: { model.selectedTakeID }, set: { if let id = $0 { model.restoreTake(id) } })) {
+                                ForEach(model.savedTakes) { item in Text(item.title).tag(Optional(item.id)) }
+                            }.disabled(locked)
+                            Button("Show files", action: model.showSavedTakes)
+                        }
+                    }
+                    if !model.saveMessage.isEmpty {
+                        HStack {
+                            Text(model.saveMessage).font(.callout).foregroundStyle(model.saveFailed ? .orange : .secondary)
+                            if model.saveFailed { Button("Retry save", action: model.persistDraft).disabled(locked) }
+                        }
+                    }
                     passageSection
                     inputSection
                     if let take = model.take {
@@ -54,7 +68,7 @@ struct RecordingView: View {
         }
         .interactiveDismissDisabled(locked)
         .padding(24)
-        .frame(minWidth: 820, idealWidth: 880, minHeight: 690, idealHeight: 780)
+        .frame(minWidth: 940, idealWidth: 1000, minHeight: 690, idealHeight: 780)
     }
 
     private var passageSection: some View {
@@ -130,17 +144,27 @@ struct RecordingView: View {
 
     private func takeSection(_ take: RecordedTake) -> some View {
         GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("\(position(take.range.start)) to \(position(take.range.end))")
                         .font(.callout.weight(.medium))
-                    Text("\(take.duration.formatted(.number.precision(.fractionLength(3)))) seconds · retained for this session")
+                    Text("\(take.duration.formatted(.number.precision(.fractionLength(3)))) seconds")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button(action: model.play) { Label(model.playing ? "Stop playback" : "Play take", systemImage: model.playing ? "stop.fill" : "play.fill") }
                     .disabled(locked || (!model.beats.isEmpty && !validBeatMap))
                 Button("Export WAV", action: model.exportWAV).disabled(locked)
+            }
+            if !model.beats.isEmpty {
+                HStack {
+                    Toggle("Hear detected beats over take", isOn: $model.hearBeats)
+                    Text("Click level").font(.caption)
+                    Slider(value: $model.clickLevel, in: 0...1).frame(width: 120).accessibilityLabel("Detected beat click level")
+                }.disabled(locked)
+                Text("Higher clicks mark downbeats. The original recording is unchanged.").font(.caption).foregroundStyle(.secondary)
+            }
             }.padding(8)
         } label: { Label("Current take", systemImage: "waveform") }
     }
@@ -149,14 +173,14 @@ struct RecordingView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 12) {
-                    Picker("Solo part", selection: $model.trackIndex) {
+                    Picker("Solo part", selection: Binding(get: { model.trackIndex }, set: { model.trackIndex = $0; model.changeTrack() })) {
                         Text("Select the monophonic solo part").tag(-1)
                         ForEach(model.tracks.indices, id: \.self) { index in
                             let track = model.tracks[index]
                             Text("\(index + 1). \(track.name.isEmpty ? "Untitled part" : track.name) · \(track.noteEvents.count) notes")
                                 .tag(index).disabled(track.noteEvents.isEmpty)
                         }
-                    }.onChange(of: model.trackIndex) { _, _ in model.changeTrack() }
+                    }
                     Button("Analyze take", action: model.analyze)
                         .disabled(model.trackIndex < 0 || !model.tracks.indices.contains(model.trackIndex))
                 }
@@ -167,11 +191,11 @@ struct RecordingView: View {
                     Text("Manual endpoints").font(.callout.weight(.medium))
                     Text("Start").foregroundStyle(.secondary)
                     RecordingNumberField("Start seconds", value: model.manualStart) {
-                        model.manualStart = $0; model.approved = false
+                        model.manualStart = $0; model.approved = false; model.persistDraft()
                     }.frame(width: 82).textFieldStyle(.roundedBorder)
                     Text("End").foregroundStyle(.secondary)
                     RecordingNumberField("End seconds", value: model.manualEnd) {
-                        model.manualEnd = $0; model.approved = false
+                        model.manualEnd = $0; model.approved = false; model.persistDraft()
                     }.frame(width: 82).textFieldStyle(.roundedBorder)
                     Text("seconds").font(.caption).foregroundStyle(.secondary)
                     Spacer(minLength: 0)
@@ -188,7 +212,7 @@ struct RecordingView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 22) {
                     VStack(spacing: 0) {
-                        HStack { Text("Measure").frame(width: 62); Text("Beat").frame(width: 42); Text("Recording seconds").frame(width: 142); Text("BPM").frame(width: 72) }
+                        HStack { Text("Measure").frame(width: 62); Text("Beat").frame(width: 42); Text("Recording seconds").frame(width: 142); Text("BPM").frame(width: 72); Text("Timing source").frame(width: 150) }
                             .font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.bottom, 8)
                         ScrollView {
                             LazyVStack(spacing: 6) {
@@ -230,6 +254,9 @@ struct RecordingView: View {
                 .accessibilityLabel("\(position(beat.quarter)) recording seconds")
                 .disabled(locked)
             Text(tempoLabel(index)).frame(width: 72)
+            Text(model.origins.indices.contains(index) ? model.origins[index].label : "Manual timing")
+                .font(.caption).foregroundStyle(model.origins.indices.contains(index) && model.origins[index] == .inferred ? .orange : .secondary)
+                .frame(width: 150, alignment: .leading)
         }.font(.callout.monospacedDigit())
     }
 

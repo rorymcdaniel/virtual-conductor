@@ -141,6 +141,7 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
 
     func testOutput() { guard !locked else { return }; do { if !audio.ready { chooseOutput() }; try audio.testTone() } catch { message = error.localizedDescription } }
     func load(midi: URL, wav: URL, musicXML: URL? = nil, scoreIdentity: URL? = nil, preservingTake: Bool = false, linked: Bool = false) {
+        guard recording.preserveCurrentTake() else { message = recording.saveMessage; return }
         if !preservingTake && !linked { museScore.disconnect() }
         run &+= 1; let token = run
         let scoreToken = scorePreparation.beginLoading()
