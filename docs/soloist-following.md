@@ -20,10 +20,10 @@ implementation is available through **Live following…** in the app.
 - The tempo tolerance is a firm limit. If the soloist slows below the allowed
   minimum between wait points, accompaniment keeps moving at that minimum,
   even if it gets ahead of the soloist. It does not stop to recover alignment.
-- If tracking becomes uncertain between wait points, accompaniment briefly
-  retains the last confidently followed tempo, then smoothly returns to the
-  planned tempo while continuing to listen for the soloist. It keeps moving
-  throughout; fallback timing remains to be determined through testing.
+- If tracking becomes uncertain between wait points, accompaniment holds its
+  current playback rate while listening for a consistent phrase. It keeps moving
+  within the chosen tolerance, and written tempo changes still apply. This replaces
+  the original return-to-planned-tempo fallback; see [tempo confidence](following-tempo-confidence.md).
 - When tracking recovers, accompaniment restores alignment through gradual
   tempo adjustments within the configured tolerance. It must not skip or
   replay music to catch up: continuity for the listener takes priority over

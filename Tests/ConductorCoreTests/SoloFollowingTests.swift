@@ -23,9 +23,9 @@ enum FollowingFixture {
         return try MusicXMLScore(data: Data("<score-partwise><part-list><score-part id=\"S\"><part-name>Solo</part-name></score-part><score-part id=\"O\"><part-name>Orchestra</part-name></score-part></part-list><part id=\"S\">\(solo)</part><part id=\"O\">\(orchestra)</part></score-partwise>".utf8))
     }
     static var solo: MusicXMLStaffID { MusicXMLStaffID(partID: "S", staffNumber: 1) }
-    static func midi() throws -> MIDIFile {
+    static func midi(quarters: Int = 16) throws -> MIDIFile {
         var track: [UInt8] = []
-        for _ in 0..<16 { track += [0, 0x90, 60, 90, 0x83, 0x60, 0x80, 60, 0] }
+        for _ in 0..<quarters { track += [0, 0x90, 60, 90, 0x83, 0x60, 0x80, 60, 0] }
         track += [0, 0xff, 0x2f, 0]
         let n = track.count
         return try MIDIFile(data: Data(Array("MThd".utf8) + [0,0,0,6,0,0,0,1,1,0xe0] + Array("MTrk".utf8) + [0,0,UInt8(n >> 8),UInt8(n & 255)] + track))
@@ -159,7 +159,7 @@ final class SoloFollowingTests: XCTestCase {
         XCTAssertNil(observe(nil, 21))
         XCTAssertEqual(observe(65, 22), 3)
     }
-    func testToleranceAndSmoothRecoveryNeverJump() {
+    func testToleranceAndTrackingLossHoldTheEstablishedPace() {
         var tempo = FollowingTempo()
         for _ in 0..<100 {
             let rate = tempo.update(delta: 0.02, tolerance: 0.1, trackedRate: 0.2, phaseError: -5, age: 0)
@@ -168,7 +168,7 @@ final class SoloFollowingTests: XCTestCase {
         let slow = tempo.rate
         XCTAssertEqual(tempo.update(delta: 0.02, tolerance: 0.1, trackedRate: 2, phaseError: 3, age: 1), slow)
         for _ in 0..<150 { _ = tempo.update(delta: 0.02, tolerance: 0.1, trackedRate: 2, phaseError: 3, age: 3) }
-        XCTAssertEqual(tempo.rate, 1, accuracy: 0.001)
+        XCTAssertEqual(tempo.rate, slow, accuracy: 0.001)
     }
     func testLivePitchDetectsInstrumentDominantOverLeakageAndRejectsSilence() {
         let rate = 48000.0
@@ -228,6 +228,32 @@ final class SoloFollowingTests: XCTestCase {
 }
 
 @MainActor final class LiveFollowingTests: XCTestCase {
+    func testUncertainForwardMatchHoldsPlaybackInsteadOfChasingPosition() async throws {
+        let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
+        var now = 0.0
+        let following = LiveFollowing(capture: input, clock: { now }, permission: { true }, defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        defer { following.stop() }
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        following.tolerance = 20
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        let pitches = [60,62,64,65]
+        var beforeError: Double?, maximumAfterError = 0.0
+        for frame in 1...350 {
+            now = Double(frame)*0.01
+            audio.sourcePosition += 0.01*(audio.rates.last ?? 1)
+            let soloQuarter = (now-0.5)*0.87/0.5
+            let wrong = soloQuarter >= 4.25 && soloQuarter < 4.75
+            let pitch = soloQuarter < 0 ? nil : wrong ? 65 : pitches[Int(soloQuarter)%4]
+            if wrong && beforeError == nil { beforeError = audio.rates.last }
+            following.observe(pitch: pitch, time: now)
+            following.tick()
+            if wrong { maximumAfterError = max(maximumAfterError, audio.rates.last ?? 1) }
+        }
+        XCTAssertLessThan(try XCTUnwrap(beforeError), 0.95)
+        XCTAssertLessThanOrEqual(maximumAfterError, try XCTUnwrap(beforeError)+0.02,
+                                 "A doubtful match must not speed up either the tempo estimate or position correction")
+    }
+
     func testHeldPitchCannotReleaseWaitAfterStaleAudioIsDiscarded() async throws {
         for discardOnBoundary in [false, true] {
             let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()

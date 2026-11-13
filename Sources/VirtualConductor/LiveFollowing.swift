@@ -221,7 +221,8 @@ extension InputCapture: FollowingInput {}
                 // through it without steering toward the previous note's end.
                 let restingAfterMatch = !expectingSound && note != nil && age < 1.5
                 let rate = tempo.update(delta: delta, tolerance: tolerance / 100, trackedRate: tracker.rate,
-                                        phaseError: expectingSound ? phaseError : 0, age: restingAfterMatch ? 0 : age)
+                                        phaseError: expectingSound ? phaseError : 0, age: restingAfterMatch ? 0 : age,
+                                        reliable: tracker.hasReliableTempo)
                 audio.setRate(rate)
                 status = expectingSound && age > 1.5 ? .lost : .following
                 detail = status == .lost ? "Keeping moving · listening for your position" : "Following within ±\(Int(tolerance))%"
