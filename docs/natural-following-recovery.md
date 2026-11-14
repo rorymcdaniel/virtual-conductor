@@ -95,7 +95,7 @@ a minimum number of recognized attacks, so freezing recognition is not a pass.
 Exit codes: 0 pass, 2 changed decisions/failed musical expectations, 1 invalid input.
 
 One actual horn passage is available so far: the measure-27 incident. Both its
-recorded observations and fresh audio analysis pass, recognizing 19 attacks and
+recorded observations and fresh audio analysis pass, recognizing 11 attacks within the asserted problem interval and
 commanding approximately 0.829–0.846 times planned tempo after the incident.
 Its case manifest remains local in `.scratch/following-rehearsals.json`; neither
 the owner's score nor audio is included in Git. Generated live-controller tests
