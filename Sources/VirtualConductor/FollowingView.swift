@@ -172,6 +172,7 @@ struct FollowingBanner: View {
     }
     private var icon: String {
         switch following.status {
+        case .holding: "ear"
         case .lost: "exclamationmark.triangle.fill"
         case .waiting: "pause.circle.fill"
         case .cadenza: "pedal.brake.fill"

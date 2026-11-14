@@ -27,7 +27,7 @@ extension InputCapture: FollowingInput {}
     @Published var tolerance: Double {
         didSet { defaults.set(tolerance, forKey: "following-tolerance") }
     }
-    let diagnostics = FollowingDiagnostics()
+    let diagnostics: FollowingDiagnostics
     private let defaults: UserDefaults
     @Published var inputID: UInt32 = AudioDevices.defaultID(input: true)
     @Published private(set) var status: FollowingStatus = .following
@@ -64,11 +64,12 @@ extension InputCapture: FollowingInput {}
 
     private enum Phase { case audio, wait(Double), free(PassageRange), cadenza(CompiledCadenza) }
 
-    init(capture: (any FollowingInput)? = nil, clock: @escaping () -> Double = { PerformanceAudio.hostSeconds },
+    init(diagnostics: FollowingDiagnostics? = nil, capture: (any FollowingInput)? = nil, clock: @escaping () -> Double = { PerformanceAudio.hostSeconds },
          permission: @escaping () async -> Bool = { await AVCaptureDevice.requestAccess(for: .audio) },
          defaults: UserDefaults = .standard) {
         self.capture = capture ?? InputCapture(); self.clock = clock; self.permission = permission
         self.defaults = defaults
+        self.diagnostics = diagnostics ?? FollowingDiagnostics()
         let saved = defaults.object(forKey: "following-tolerance") as? Double ?? 10
         tolerance = saved.isFinite && (0...75).contains(saved) ? saved : 10
         self.capture.interrupted = { [weak self] in self?.inputFailed() }
@@ -192,6 +193,14 @@ extension InputCapture: FollowingInput {}
     func tick() {
         guard active, let audio, let prepared, let plan else { return }
         let now = clock(), delta = min(0.1, max(0, now - max(entered, lastTick))); lastTick = now
+        defer {
+            if active {
+                let atLimit: Bool
+                if case .audio = phase { atLimit = tolerance > 0 && abs(tempo.rate - 1) >= tolerance / 100 - 0.002 }
+                else { atLimit = false }
+                diagnostics.monitor(status: status, time: now, atTempoLimit: atLimit)
+            }
+        }
         guard capture.ready else { inputFailed(); return }
         if case .cadenza = phase {
             // Keep the meter fresh without interpreting arbitrary cadenza notes.
@@ -213,19 +222,23 @@ extension InputCapture: FollowingInput {}
                 }
                 let q = quarter(position)
                 guard q >= 0 else { return }
-                let note = tracker.index.map { plan.notes[$0] }
                 let expectingSound = plan.notes.contains { $0.startQuarter <= q && q < $0.endQuarter }
                 let age = now - tracker.lastMatch
-                let phaseError = note.map { min(seconds($0.endQuarter), seconds($0.startQuarter) + (now - tracker.lastAttack) * tracker.rate) - position } ?? 0
-                // A written rest is expected silence. Carry the established pace
-                // through it without steering toward the previous note's end.
-                let restingAfterMatch = !expectingSound && note != nil && age < 1.5
-                let rate = tempo.update(delta: delta, tolerance: tolerance / 100, trackedRate: tracker.rate,
-                                        phaseError: expectingSound ? phaseError : 0, age: restingAfterMatch ? 0 : age,
-                                        reliable: tracker.hasReliableTempo)
+                let input = FollowingTempoInput.accompanied(delta: delta, tolerance: tolerance / 100, tracker: tracker,
+                    notes: plan.notes, midi: prepared.midi, scoreTime: position - prepared.timing.prepSeconds, time: now)
+                let before = tempo
+                let rate = tempo.update(input)
                 audio.setRate(rate)
-                status = expectingSound && age > 1.5 ? .lost : .following
-                detail = status == .lost ? "Keeping moving · listening for your position" : "Following within ±\(Int(tolerance))%"
+                let beatSeconds = prepared.midi.seconds(atQuarter: q + 0.001) - prepared.midi.seconds(atQuarter: q)
+                diagnostics.recordControl(FollowingControlDecision(time: now, scoreTime: position - prepared.timing.prepSeconds,
+                    plannedBPM: 0.06 / beatSeconds, before: before, input: input, rate: rate))
+                if expectingSound && age > 1.5 && now - entered > 1.5 {
+                    status = .lost; detail = "Keeping moving · listening for your position"
+                } else if input.isHolding {
+                    status = .holding; detail = "Listening for a steady phrase · within ±\(Int(tolerance))%"
+                } else {
+                    status = .following; detail = "Following within ±\(Int(tolerance))%"
+                }
             case .wait:
                 if now - lastObservation > 0.5 || (lastPitch != nil && now - entered > 0.7) { status = .lost }
             case .cadenza: break
@@ -281,6 +294,7 @@ extension InputCapture: FollowingInput {}
     }
 
     private func resetAnalysis() {
+        diagnostics.preserveIncident("Audio delivery discontinuity", time: clock())
         diagnostics.audioDiscontinuity()
         diagnostics.notice("Audio delivery discontinuity; recognition timing reset", time: clock())
         analyzer = nil; analysisOrigin = nil; analysisSamples = 0; status = .lost
@@ -384,5 +398,9 @@ extension InputCapture: FollowingInput {}
     }
 
     private func inputFailed() { fail(MusicalError("Following microphone interrupted. Playback paused; reconnect the input and resume explicitly.")) }
-    private func fail(_ error: Error) { diagnostics.notice(error.localizedDescription, time: clock()); stop(); status = .lost; detail = error.localizedDescription; failed?(detail) }
+    private func fail(_ error: Error) {
+        diagnostics.notice(error.localizedDescription, time: clock())
+        diagnostics.preserveIncident(error.localizedDescription, time: clock())
+        stop(); status = .lost; detail = error.localizedDescription; failed?(detail)
+    }
 }

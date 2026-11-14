@@ -35,11 +35,14 @@ public struct FollowingDiagnostic: Codable, Sendable {
     public let midi: MIDIFile
     public var decisions: [FollowingDecision]
     public var notices: [DiagnosticNotice]
+    // Optional additions keep older version-1 reports readable.
+    public var controls: [FollowingControlDecision]?
     public var audioStart: Double?
     public var audioEnd: Double?
     public init(sampleRate: Double, tolerance: Double, notes: [MIDINote], midi: MIDIFile) {
         created = Date(); self.sampleRate = sampleRate; self.tolerance = tolerance; self.notes = notes; self.midi = midi
         decisions = []; notices = []
+        controls = []
     }
     public func encoded() throws -> Data {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
@@ -54,7 +57,10 @@ public struct FollowingDiagnostic: Codable, Sendable {
               report.midi.segments.allSatisfy({ $0.quarter.isFinite && $0.seconds.isFinite && $0.secondsPerQuarter.isFinite && $0.secondsPerQuarter > 0 }),
               report.notes.allSatisfy({ $0.startQuarter.isFinite && $0.endQuarter.isFinite }),
               report.decisions.allSatisfy({ $0.time.isFinite && $0.expectedQuarter.isFinite && !$0.throughQuarter.isNaN &&
-                  $0.tracker.validForReplay(noteCount: report.notes.count) && ($0.pitch.map { (0...127).contains($0) } ?? true) }) else {
+                  $0.tracker.validForReplay(noteCount: report.notes.count) && ($0.pitch.map { (0...127).contains($0) } ?? true) }),
+              report.controls?.allSatisfy({ $0.time.isFinite && $0.scoreTime.isFinite && $0.plannedBPM.isFinite &&
+                  $0.plannedBPM > 0 && $0.input.valid && $0.before.rate.isFinite && (0.25...1.75).contains($0.before.rate) &&
+                  $0.rate.isFinite && (0.25...1.75).contains($0.rate) }) ?? true else {
             throw MusicalError("Unsupported or invalid following diagnostic.")
         }
         return report
@@ -67,6 +73,14 @@ public struct FollowingDiagnostic: Codable, Sendable {
             let match = tracker.observe(pitch: event.pitch, time: event.time, notes: notes, expectedQuarter: event.expectedQuarter,
                                         free: event.free, midi: midi, rearticulated: event.rearticulated, throughQuarter: event.throughQuarter)
             return match != event.matched || abs(tracker.rate - event.rate) > 1e-9
+        }
+    }
+
+    public func replayControls() -> [Int] {
+        let events = controls ?? []
+        return events.indices.filter { i in
+            var controller = events[i].before
+            return abs(controller.update(events[i].input) - events[i].rate) > 1e-9
         }
     }
 }

@@ -3,6 +3,97 @@ import ConductorCore
 @testable import VirtualConductor
 
 @MainActor final class FollowingDiagnosticsTests: XCTestCase {
+    func testAutomaticStorageIsBoundedAndManualReportsSurvive() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let diagnostics = FollowingDiagnostics(root: root)
+        let midi = try FollowingFixture.midi(), plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        diagnostics.begin(sampleRate: 8000, tolerance: 20, plan: plan, midi: midi)
+        diagnostics.notice("Manual keeper", time: 0); diagnostics.save()
+        while diagnostics.saving { await Task.yield() }
+        let manual = try XCTUnwrap(diagnostics.savedURL)
+        for session in 0..<14 {
+            diagnostics.begin(sampleRate: 8000, tolerance: 20, plan: plan, midi: midi)
+            diagnostics.includeAudio = session == 13
+            diagnostics.capture([Float](repeating: 0.1, count: 800), start: 0)
+            XCTAssertTrue(diagnostics.preserveIncident("Test incident", time: 0))
+            while diagnostics.saving { await Task.yield() }
+        }
+        let automatic = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("Automatic"), includingPropertiesForKeys: nil)
+        XCTAssertEqual(automatic.count, 12)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: manual.appendingPathComponent("report.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(diagnostics.savedURL).appendingPathComponent("audio.wav").path))
+        XCTAssertFalse(diagnostics.preserveIncident("Too soon", time: 10))
+        XCTAssertTrue(diagnostics.preserveIncident("Next incident", time: 31))
+        while diagnostics.saving { await Task.yield() }
+        XCTAssertTrue(diagnostics.preserveIncident("Third incident", time: 62))
+        while diagnostics.saving { await Task.yield() }
+        XCTAssertFalse(diagnostics.preserveIncident("Session cap", time: 100))
+    }
+
+    func testFailedAutomaticSaveRetainsEvidenceForRetryAcrossANewPerformance() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data("blocked".utf8).write(to: root)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let diagnostics = FollowingDiagnostics(root: root)
+        let midi = try FollowingFixture.midi(), plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        diagnostics.begin(sampleRate: 8000, tolerance: 20, plan: plan, midi: midi)
+        XCTAssertTrue(diagnostics.preserveIncident("Original incident", time: 1))
+        while diagnostics.saving { await Task.yield() }
+        XCTAssertTrue(diagnostics.message.contains("could not be saved"))
+        diagnostics.begin(sampleRate: 8000, tolerance: 20, plan: plan, midi: midi)
+        XCTAssertTrue(diagnostics.canSave)
+        try FileManager.default.removeItem(at: root)
+        diagnostics.save()
+        while diagnostics.saving { await Task.yield() }
+        let report = try FollowingDiagnostic.decode(Data(contentsOf: try XCTUnwrap(diagnostics.savedURL).appendingPathComponent("report.json")))
+        XCTAssertTrue(report.notices.contains { $0.reason.contains("Original incident") })
+    }
+
+    func testTempoLimitRequiresDwellAndIntentionalWaitsAreNotIncidents() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let diagnostics = FollowingDiagnostics(root: root)
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        diagnostics.begin(sampleRate: 8000, tolerance: 20, plan: plan, midi: try FollowingFixture.midi())
+        for status in [FollowingStatus.waiting, .cadenza] {
+            diagnostics.monitor(status: status, time: 0, atTempoLimit: true)
+            diagnostics.monitor(status: status, time: 60, atTempoLimit: true)
+        }
+        XCTAssertNil(diagnostics.savedURL)
+        diagnostics.monitor(status: .following, time: 61, atTempoLimit: true)
+        diagnostics.monitor(status: .following, time: 62, atTempoLimit: true)
+        XCTAssertFalse(diagnostics.saving)
+        diagnostics.monitor(status: .following, time: 63.1, atTempoLimit: true)
+        while diagnostics.saving { await Task.yield() }
+        XCTAssertNotNil(diagnostics.savedURL)
+    }
+
+    func testAutomaticIncidentPreservesReportWithoutRepeatedSaves() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let diagnostics = FollowingDiagnostics(root: root)
+        let midi = try FollowingFixture.midi(), plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        diagnostics.begin(sampleRate: 8000, tolerance: 20, plan: plan, midi: midi)
+        diagnostics.notice("Started", time: 0)
+        diagnostics.monitor(status: .holding, time: 0)
+        diagnostics.monitor(status: .holding, time: 2)
+        XCTAssertNil(diagnostics.savedURL)
+        diagnostics.monitor(status: .holding, time: 3.1)
+        while diagnostics.saving { await Task.yield() }
+        let first = try XCTUnwrap(diagnostics.savedURL)
+        let report = try FollowingDiagnostic.decode(Data(contentsOf: first.appendingPathComponent("report.json")))
+        XCTAssertTrue(report.notices.contains { $0.reason.contains("Holding tempo") })
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.appendingPathComponent("audio.wav").path))
+        for time in [4.0, 15, 40, 90] { diagnostics.monitor(status: .holding, time: time) }
+        while diagnostics.saving { await Task.yield() }
+        XCTAssertEqual(diagnostics.savedURL, first, "One continuous incident produces one report")
+        diagnostics.monitor(status: .following, time: 91)
+        diagnostics.monitor(status: .lost, time: 92)
+        while diagnostics.saving { await Task.yield() }
+        XCTAssertNotEqual(diagnostics.savedURL, first)
+    }
+
     func testBoundedOptionalAudioAndReplayAfterSaving() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
