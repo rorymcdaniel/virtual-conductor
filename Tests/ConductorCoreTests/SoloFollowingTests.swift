@@ -4,12 +4,12 @@ import ConductorCore
 @testable import VirtualConductor
 
 enum FollowingFixture {
-    static func score(silentMeasures: Int = 2, silentFrom: Int = 0, transpose: Int = 0, restAcrossReturn: Bool = false, sustainAcrossReturn: Bool = false) throws -> MusicXMLScore {
+    static func score(silentMeasures: Int = 2, silentFrom: Int = 0, transpose: Int = 0, restAcrossReturn: Bool = false, sustainAcrossReturn: Bool = false, soloRestMeasures: Set<Int> = []) throws -> MusicXMLScore {
         let names = ["C", "D", "E", "F"]
         let attributes = "<attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time><transpose><chromatic>\(transpose)</chromatic></transpose></attributes>"
         let solo = (0..<4).map { m in
             "<measure number=\"\(m+1)\">" + (m == 0 ? attributes : "") + names.enumerated().map { beat, name in
-                if restAcrossReturn && ((m == 1 && beat == 3) || (m == 2 && beat == 0)) { return "<note><rest/><duration>1</duration></note>" }
+                if soloRestMeasures.contains(m) || (restAcrossReturn && ((m == 1 && beat == 3) || (m == 2 && beat == 0))) { return "<note><rest/><duration>1</duration></note>" }
                 if sustainAcrossReturn && ((m == 1 && beat == 3) || (m == 2 && beat == 0)) {
                     return "<note><pitch><step>F</step><octave>4</octave></pitch><duration>1</duration><tie type=\"\(m == 1 ? "start" : "stop")\"/></note>"
                 }
@@ -206,7 +206,7 @@ final class SoloFollowingTests: XCTestCase {
     }
 }
 
-@MainActor private final class FollowingTestInput: FollowingInput {
+@MainActor final class FollowingTestInput: FollowingInput {
     var storage: CaptureStorage?
     var sampleRate = 8000.0
     var ready = false
@@ -214,7 +214,7 @@ final class SoloFollowingTests: XCTestCase {
     func startStreaming(device: UInt32) async throws { ready = true }
     func release() { ready = false }
 }
-@MainActor private final class FollowingTestAudio: FollowingAudio {
+@MainActor final class FollowingTestAudio: FollowingAudio {
     var played: [AudioSegment] = []
     var appended: [AudioSegment] = []
     var sourcePosition = 0.0
@@ -228,10 +228,60 @@ final class SoloFollowingTests: XCTestCase {
 }
 
 @MainActor final class LiveFollowingTests: XCTestCase {
+    func testWrittenSoloRestDoesNotConsumeAutomaticProblemReports() async throws {
+        let input = FollowingTestInput(), audio = FollowingTestAudio(), diagnostics = makeDiagnostics()
+        let prepared = try FollowingFixture.prepared()
+        var now = 0.0
+        let following = LiveFollowing(diagnostics: diagnostics, capture: input, clock: { now }, permission: { true }, defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0, soloRestMeasures: [1,2]), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        defer { following.stop() }
+        for frame in 50...640 {
+            now = Double(frame)*0.01; audio.sourcePosition = now; following.tick()
+            let q = Int((now-0.5)*2)
+            following.observe(pitch: q < 4 ? [60,62,64,65][q] : nil, time: now)
+        }
+        while diagnostics.saving { await Task.yield() }
+        XCTAssertEqual(following.status, .following)
+        XCTAssertNil(diagnostics.savedURL, "Expected silence must leave the incident budget for actual problems")
+    }
+
+    private var testDiagnostics: [FollowingDiagnostics] = []
+    private func makeDiagnostics() -> FollowingDiagnostics {
+        let value = FollowingDiagnostics(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        testDiagnostics.append(value)
+        return value
+    }
+    override func tearDown() async throws {
+        for diagnostics in testDiagnostics {
+            while diagnostics.saving { await Task.yield() }
+            try? FileManager.default.removeItem(at: diagnostics.root)
+        }
+        testDiagnostics = []
+    }
+
+    func testUnconfirmedPhraseDisplaysHoldingTempoUntilItCanFollow() async throws {
+        let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
+        var now = 0.0
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true }, defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        defer { following.stop() }
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        for (index, pitch) in [60,62,64].enumerated() {
+            now = 0.5 + Double(index)*0.5
+            audio.sourcePosition = now
+            following.tick()
+            following.observe(pitch: pitch, time: now)
+            following.observe(pitch: pitch, time: now+0.02)
+            now += 0.02; following.tick()
+            XCTAssertEqual(following.status.rawValue, index < 2 ? "Holding tempo" : "Following")
+        }
+    }
+
     func testUncertainForwardMatchHoldsPlaybackInsteadOfChasingPosition() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true }, defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true }, defaults: UserDefaults(suiteName: UUID().uuidString)!)
         defer { following.stop() }
         let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo, waits: [], cadenzas: [])
         following.tolerance = 20
@@ -258,7 +308,7 @@ final class SoloFollowingTests: XCTestCase {
         for discardOnBoundary in [false, true] {
             let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
             var now = 0.0
-            let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+            let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
             let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo,
                                          waits: [WaitPoint(measure: 2, beat: 1)], cadenzas: [])
             try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
@@ -283,7 +333,7 @@ final class SoloFollowingTests: XCTestCase {
     func testCaptureGapRebasesClockAndRecoversFreeFollowing() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [],
                                      freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
@@ -307,7 +357,7 @@ final class SoloFollowingTests: XCTestCase {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         input.sampleRate = 48000
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo,
                                      waits: [WaitPoint(measure: 1, beat: 1)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
@@ -337,7 +387,7 @@ final class SoloFollowingTests: XCTestCase {
     func testFastPhraseSurvivesMicrophoneDeliveryInLargeBatches() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [],
                                      freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
@@ -361,7 +411,7 @@ final class SoloFollowingTests: XCTestCase {
         let start = 16000, frames = 2000
         for i in 0..<frames { prepared.source.floatChannelData![0][start+i] = 0.1 * Float(frames-i)/Float(frames) }
         let plan = try FollowingPlan(score: FollowingFixture.score(silentFrom: 1), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 4, end: 12)], cadenzas: [])
-        let follower = LiveFollowing(capture: input, permission: { true })
+        let follower = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, permission: { true })
         try await follower.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         let segment = try XCTUnwrap(audio.played.first)
         let boundary = Int(segment.clicks.frameLength)
@@ -378,7 +428,7 @@ final class SoloFollowingTests: XCTestCase {
     func testReturnInsideHeldNoteRequestsPedalInsteadOfGuessingRubato() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(sustainAcrossReturn: true), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()
@@ -394,7 +444,7 @@ final class SoloFollowingTests: XCTestCase {
     func testFreePassageWithSoloRestCountsToReturnAtPlannedTempo() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(restAcrossReturn: true), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()
@@ -413,7 +463,7 @@ final class SoloFollowingTests: XCTestCase {
     func testExplicitWaitInsideFreePassageCannotBeSkippedByPhraseMatching() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo,
                                      waits: [WaitPoint(measure: 1, beat: 2)], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
@@ -428,7 +478,7 @@ final class SoloFollowingTests: XCTestCase {
     func testSyntheticMicrophoneStreamReleasesExpectedEntrance() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo,
                                      waits: [WaitPoint(measure: 1, beat: 1)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
@@ -453,7 +503,7 @@ final class SoloFollowingTests: XCTestCase {
     func testHeldEarlierPitchDoesNotReleaseLaterWait() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo,
                                      waits: [WaitPoint(measure: 2, beat: 1)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
@@ -467,7 +517,7 @@ final class SoloFollowingTests: XCTestCase {
     func testLostFreeFollowingStaysSilentThroughSubsequentSilenceUntilPedal() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()
@@ -480,7 +530,7 @@ final class SoloFollowingTests: XCTestCase {
     func testStopWhilePermissionPendingCannotStartMicrophoneOrPlayback() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var permission: CheckedContinuation<Bool, Never>?
-        let following = LiveFollowing(capture: input, permission: { await withCheckedContinuation { permission = $0 } })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, permission: { await withCheckedContinuation { permission = $0 } })
         let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         let task = Task { try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0) }
         while permission == nil { await Task.yield() }
@@ -491,7 +541,7 @@ final class SoloFollowingTests: XCTestCase {
     func testWaitRequiresExpectedAttackAndPedalOverrides() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo,
                                      waits: [WaitPoint(measure: 1, beat: 1), WaitPoint(measure: 1, beat: 2)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
@@ -510,7 +560,7 @@ final class SoloFollowingTests: XCTestCase {
     func testOnTimeEntranceQueuesContinuousAudio() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo,
                                      waits: [WaitPoint(measure: 1, beat: 2)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
@@ -524,7 +574,7 @@ final class SoloFollowingTests: XCTestCase {
     func testFreeFollowingWaitsThroughPauseAndReturnsAtPlannedTempo() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()
@@ -551,7 +601,7 @@ final class SoloFollowingTests: XCTestCase {
         let prepared = try PreparedPerformance(midi: base.midi, source: base.source, preparation: 0,
             passages: [CadenzaPassage(startMeasure: 1, startBeat: 1.5, returnMeasure: 3, returnBeat: 1)])
         let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: prepared.passages)
-        let following = LiveFollowing(capture: input, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, permission: { true })
         defer { following.stop() }
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         let segment = try XCTUnwrap(audio.played.first)
@@ -575,7 +625,7 @@ final class SoloFollowingTests: XCTestCase {
             let input = FollowingTestInput(), audio = FollowingTestAudio()
             let prepared = try FollowingFixture.prepared(cadenzas: [CadenzaPassage(startMeasure: 1, startBeat: 2, returnMeasure: 3, returnBeat: 1)])
             var now = 0.0
-            let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+            let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
             defer { following.stop() }
             let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: prepared.passages)
             try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
@@ -597,7 +647,7 @@ final class SoloFollowingTests: XCTestCase {
         let input = FollowingTestInput(), audio = FollowingTestAudio()
         let prepared = try FollowingFixture.prepared(cadenzas: [CadenzaPassage(startMeasure: 1, startBeat: 2, returnMeasure: 3, returnBeat: 1)])
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         defer { following.stop() }
         let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: prepared.passages)
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
@@ -619,7 +669,7 @@ final class SoloFollowingTests: XCTestCase {
         let input = FollowingTestInput(), audio = FollowingTestAudio()
         let prepared = try FollowingFixture.prepared(cadenzas: [CadenzaPassage(startMeasure: 1, startBeat: 1, returnMeasure: 3, returnBeat: 1)])
         var now = 0.0
-        let following = LiveFollowing(capture: input, clock: { now }, permission: { true })
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: input, clock: { now }, permission: { true })
         let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [WaitPoint(measure: 1, beat: 1)], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: prepared.passages)
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()

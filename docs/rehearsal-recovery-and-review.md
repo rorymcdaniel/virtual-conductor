@@ -59,6 +59,15 @@ An interruption clears the audio excerpt rather than splicing separated moments.
 The last report can still be saved after stopping; starting another performance
 begins a fresh capture. Nothing is uploaded.
 
+Problem reports now also save automatically after tracking loss, an audio
+interruption, three seconds holding for uncertain evidence, or two seconds at a
+tempo limit. At most three automatic reports are saved per performance, at least
+30 seconds apart. They include up to 3,000 playback commands in addition to the
+recognition decisions. **Show report** opens the latest saved report from this
+performance. A failed write preserves a frozen snapshot in memory for **Save
+following report** to retry, even after starting another performance. That unsaved
+snapshot does not survive quitting the app.
+
 The installed app includes a replay tool:
 
 ```sh
@@ -73,7 +82,8 @@ swift run FollowingReplay '/path/to/Following-UUID/report.json' --audio
 ```
 
 The first command re-evaluates each recognition decision with its captured phrase
-context and reports changed matches or tempo estimates. It returns exit code 2
+context, and each playback command with its captured controller context. It
+reports changed matches, tempo estimates, and playback commands. It returns exit code 2
 for changed results, 1 for an invalid report, and 0 for identical results. The
 optional audio pass runs today's detector over the saved excerpt afresh. This
 replays recognition, not full audio transport or physical device latency. A
@@ -84,8 +94,10 @@ phase, timing, and interruption reasons; it should be shared only deliberately.
 
 Data stays under `~/Library/Application Support/VirtualConductor/`: `Takes/v1`
 contains lossless Float32 PCM and atomic JSON metadata, and `Diagnostics` contains
-saved reports and optional WAV excerpts. Neither collection is automatically
-pruned. Take audio is immutable; only the small metadata file is replaced when
+saved reports and optional WAV excerpts. Takes and manually saved reports are not
+automatically pruned. `Diagnostics/Automatic` retains the newest 12 automatic
+reports; copy a report elsewhere or save manually to keep it indefinitely.
+Take audio is immutable; only the small metadata file is replaced when
 editing. Incomplete/corrupt records are retained and reported. Retry save and WAV
 export are available when storage fails. A failed late completion from an earlier
 score remains in memory for retry/export. Existing tests use isolated libraries.
