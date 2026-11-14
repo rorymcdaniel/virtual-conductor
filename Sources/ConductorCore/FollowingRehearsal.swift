@@ -39,9 +39,11 @@ public enum FollowingRehearsal {
         }
         let events = report.decisions.filter { $0.expectedQuarter >= test.fromQuarter && $0.expectedQuarter < test.toQuarter }
         guard let first = events.first, let last = events.last, last.time > first.time,
-              events.allSatisfy({ !$0.free && $0.phase == "audio" }),
+              (report.decisions.first?.expectedQuarter ?? .infinity) <= test.fromQuarter,
+              (report.decisions.last?.expectedQuarter ?? -.infinity) >= test.toQuarter,
+              events.allSatisfy({ !$0.free && $0.resolvedPhase == .audio }),
               !report.notices.contains(where: { $0.time > first.time && $0.time < last.time &&
-                  ($0.reason.contains("discontinuity") || $0.reason.contains("pedal") || $0.reason.contains("stopped")) }) else {
+                  $0.interruptsReplay }) else {
             throw MusicalError("Rehearsal cases require an uninterrupted accompanied passage.")
         }
         let observations: [SoloObservation]
@@ -68,7 +70,7 @@ public enum FollowingRehearsal {
             position += delta * controller.rate
             if tracker.observe(pitch: observation.pitch, time: observation.time, notes: report.notes,
                 expectedQuarter: report.midi.quarter(atSeconds: position), free: false, midi: report.midi,
-                rearticulated: observation.rearticulated) != nil { matches += 1 }
+                rearticulated: observation.rearticulated) != nil, observation.time >= checkTime { matches += 1 }
             let input = FollowingTempoInput.accompanied(delta: min(0.1, delta), tolerance: report.tolerance/100,
                 tracker: tracker, notes: report.notes, midi: report.midi, scoreTime: position, time: observation.time)
             let rate = controller.update(input)

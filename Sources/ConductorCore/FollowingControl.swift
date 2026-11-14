@@ -35,12 +35,12 @@ public struct FollowingTempoInput: Codable, Sendable {
 
     public var reason: String {
         if !reliable { return "Holding tempo: uncertain phrase" }
-        if age >= 0.6 { return "Holding tempo: no recent match" }
-        if abs(phaseError) > 0.035 { return "Following phrase with gentle position correction" }
+        if age >= FollowingTempo.recentMatchWindow { return "Holding tempo: no recent match" }
+        if abs(phaseError) > FollowingTempo.timingAllowance { return "Following phrase with gentle position correction" }
         return "Following phrase tempo"
     }
 
-    public var isHolding: Bool { !reliable || age >= 0.6 }
+    public var isHolding: Bool { !reliable || age >= FollowingTempo.recentMatchWindow }
     public var valid: Bool {
         delta.isFinite && delta >= 0 && tolerance.isFinite && (0...0.75).contains(tolerance) &&
         trackedRate.isFinite && (0.1...4).contains(trackedRate) && phaseError.isFinite &&

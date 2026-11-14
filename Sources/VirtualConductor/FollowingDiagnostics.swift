@@ -46,9 +46,9 @@ import ConductorCore
         if report!.decisions.count > 3000 { report!.decisions.removeFirst(100) }
         if !available { available = true }
     }
-    func notice(_ reason: String, time: Double) {
+    func notice(_ reason: String, time: Double, kind: DiagnosticNotice.Kind = .information) {
         guard report != nil else { return }
-        report!.notices.append(DiagnosticNotice(time: time, reason: reason))
+        report!.notices.append(DiagnosticNotice(time: time, reason: reason, kind: kind))
         if report!.notices.count > 200 { report!.notices.removeFirst() }
         if !available { available = true }
     }
@@ -126,7 +126,11 @@ import ConductorCore
                         (captured.1.isEmpty ? " without audio." : " with a recent audio excerpt.")
                 }
             } catch {
-                failedSnapshot = captured
+                var retained = captured
+                if !includeAudio {
+                    retained.0.audioStart = nil; retained.0.audioEnd = nil; retained.1 = []
+                }
+                failedSnapshot = retained
                 message = "Report could not be saved. Evidence kept in memory; Save following report retries. " + error.localizedDescription
             }
             saving = false

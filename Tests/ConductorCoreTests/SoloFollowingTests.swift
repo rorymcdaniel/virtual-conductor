@@ -4,12 +4,12 @@ import ConductorCore
 @testable import VirtualConductor
 
 enum FollowingFixture {
-    static func score(silentMeasures: Int = 2, silentFrom: Int = 0, transpose: Int = 0, restAcrossReturn: Bool = false, sustainAcrossReturn: Bool = false) throws -> MusicXMLScore {
+    static func score(silentMeasures: Int = 2, silentFrom: Int = 0, transpose: Int = 0, restAcrossReturn: Bool = false, sustainAcrossReturn: Bool = false, soloRestMeasures: Set<Int> = []) throws -> MusicXMLScore {
         let names = ["C", "D", "E", "F"]
         let attributes = "<attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time><transpose><chromatic>\(transpose)</chromatic></transpose></attributes>"
         let solo = (0..<4).map { m in
             "<measure number=\"\(m+1)\">" + (m == 0 ? attributes : "") + names.enumerated().map { beat, name in
-                if restAcrossReturn && ((m == 1 && beat == 3) || (m == 2 && beat == 0)) { return "<note><rest/><duration>1</duration></note>" }
+                if soloRestMeasures.contains(m) || (restAcrossReturn && ((m == 1 && beat == 3) || (m == 2 && beat == 0))) { return "<note><rest/><duration>1</duration></note>" }
                 if sustainAcrossReturn && ((m == 1 && beat == 3) || (m == 2 && beat == 0)) {
                     return "<note><pitch><step>F</step><octave>4</octave></pitch><duration>1</duration><tie type=\"\(m == 1 ? "start" : "stop")\"/></note>"
                 }
@@ -228,6 +228,24 @@ final class SoloFollowingTests: XCTestCase {
 }
 
 @MainActor final class LiveFollowingTests: XCTestCase {
+    func testWrittenSoloRestDoesNotConsumeAutomaticProblemReports() async throws {
+        let input = FollowingTestInput(), audio = FollowingTestAudio(), diagnostics = makeDiagnostics()
+        let prepared = try FollowingFixture.prepared()
+        var now = 0.0
+        let following = LiveFollowing(diagnostics: diagnostics, capture: input, clock: { now }, permission: { true }, defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0, soloRestMeasures: [1,2]), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        defer { following.stop() }
+        for frame in 50...640 {
+            now = Double(frame)*0.01; audio.sourcePosition = now; following.tick()
+            let q = Int((now-0.5)*2)
+            following.observe(pitch: q < 4 ? [60,62,64,65][q] : nil, time: now)
+        }
+        while diagnostics.saving { await Task.yield() }
+        XCTAssertEqual(following.status, .following)
+        XCTAssertNil(diagnostics.savedURL, "Expected silence must leave the incident budget for actual problems")
+    }
+
     private var testDiagnostics: [FollowingDiagnostics] = []
     private func makeDiagnostics() -> FollowingDiagnostics {
         let value = FollowingDiagnostics(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))

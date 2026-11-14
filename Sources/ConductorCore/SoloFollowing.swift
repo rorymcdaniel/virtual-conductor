@@ -255,17 +255,19 @@ public struct LiveArticulation: Sendable {
 /// Smoothed bounded rate control. Uncertain or stale tracking holds the current
 /// rate; only a trusted phrase may steer tempo or position within the user's limit.
 public struct FollowingTempo: Codable, Sendable {
+    public static let recentMatchWindow = 0.6
+    public static let timingAllowance = 0.035
     public private(set) var rate = 1.0
     public init() {}
     public mutating func reset() { rate = 1 }
     public mutating func update(delta: Double, tolerance: Double, trackedRate: Double, phaseError: Double, age: Double, reliable: Bool = true) -> Double {
         let bound = min(0.75, max(0, tolerance))
         let target: Double
-        if reliable && age < 0.6 {
+        if reliable && age < Self.recentMatchWindow {
             // A breath or slightly late attack is a position difference, not a
             // new tempo. Allow 35 ms of timing play, then recover gently with at
             // most four percentage points beyond the established phrase pace.
-            let error = max(0, abs(phaseError) - 0.035) * (phaseError < 0 ? -1.0 : 1.0)
+            let error = max(0, abs(phaseError) - Self.timingAllowance) * (phaseError < 0 ? -1.0 : 1.0)
             let correction = min(0.04, max(-0.04, error * 0.5))
             target = min(1 + bound, max(1 - bound, trackedRate + correction))
         }

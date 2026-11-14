@@ -3,6 +3,26 @@ import ConductorCore
 @testable import VirtualConductor
 
 @MainActor final class FollowingDiagnosticsTests: XCTestCase {
+    func testOptingOutDuringAFailedSaveCannotRestoreAudioOnRetry() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data("blocked".utf8).write(to: root)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let diagnostics = FollowingDiagnostics(root: root)
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        diagnostics.begin(sampleRate: 8000, tolerance: 20, plan: plan, midi: try FollowingFixture.midi())
+        diagnostics.includeAudio = true
+        diagnostics.capture([Float](repeating: 0.1, count: 800), start: 0)
+        diagnostics.preserveIncident("Test failure", time: 0)
+        diagnostics.includeAudio = false
+        while diagnostics.saving { await Task.yield() }
+        try FileManager.default.removeItem(at: root)
+        diagnostics.save()
+        while diagnostics.saving { await Task.yield() }
+        let url = try XCTUnwrap(diagnostics.savedURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.appendingPathComponent("audio.wav").path))
+        XCTAssertNil(try FollowingDiagnostic.decode(Data(contentsOf: url.appendingPathComponent("report.json"))).audioStart)
+    }
+
     func testAutomaticStorageIsBoundedAndManualReportsSurvive() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

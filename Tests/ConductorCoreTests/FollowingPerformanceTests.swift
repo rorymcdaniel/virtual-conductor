@@ -64,16 +64,28 @@ import ConductorCore
 
     func testRehearsalRegressionChecksFailWhenPlaybackViolatesTheMusicalExpectation() async throws {
         let report = try await perform(onsets: (0..<16).map { 0.5 + Double($0)*0.5 })
-        func replay(maximum: Double) throws -> FollowingRehearsalResult {
+        func replay(maximum: Double, frozen: Bool = false, interrupted: Bool = false) throws -> FollowingRehearsalResult {
             let data = Data("""
             {"name":"Steady passage","report":"unused.json","source":"decisions",
-             "fromQuarter":4,"toQuarter":12,"checkFromQuarter":6,"startingRate":1,
-             "minimumRate":0.95,"maximumRate":\(maximum),"minimumMatches":5}
+             "fromQuarter":4,"toQuarter":12,"checkFromQuarter":8,"startingRate":1,
+             "minimumRate":0.95,"maximumRate":\(maximum),"minimumMatches":3}
             """.utf8)
-            return try FollowingRehearsal.run(JSONDecoder().decode(FollowingRehearsalCase.self, from: data), report: report)
+            var evidence = report
+            if interrupted { evidence.notices.append(DiagnosticNotice(time: 5, reason: "Renamed lifecycle message", kind: .interruption)) }
+            if frozen {
+                evidence.decisions = report.decisions.map { event in
+                    FollowingDecision(tracker: event.tracker, pitch: event.expectedQuarter >= 8 ? nil : event.pitch,
+                        time: event.time, expectedQuarter: event.expectedQuarter, free: event.free,
+                        throughQuarter: event.throughQuarter, rearticulated: event.rearticulated,
+                        matched: event.matched, rate: event.rate, phase: event.phase, level: event.level)
+                }
+            }
+            return try FollowingRehearsal.run(JSONDecoder().decode(FollowingRehearsalCase.self, from: data), report: evidence)
         }
         XCTAssertTrue(try replay(maximum: 1.05).passed)
         XCTAssertFalse(try replay(maximum: 0.96).passed)
+        XCTAssertFalse(try replay(maximum: 1.05, frozen: true).passed)
+        XCTAssertThrowsError(try replay(maximum: 1.05, interrupted: true))
     }
 
     func testWrittenRitardandoChangesTheBaselineWithoutUsingUpTolerance() async throws {
