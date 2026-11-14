@@ -107,3 +107,21 @@ Replay does not measure physical microphone/headphone latency or the musical
 quality of stretched audio. The original pitch ambiguity remains unexplained;
 the controller limits its consequences. Notated pauses still require configured
 wait points or cadenzas; this update does not automatically interpret fermatas.
+
+## Verification on 2026-11-13
+
+The warnings-as-errors suite completed 151 tests with no failures and two opt-in
+hardware checks skipped. All 62 focused release checks passed. Independent
+standards and specification reviews cleared after regressions fixed audio opt-out
+during a failed save, expected-rest incident suppression, and recognition frozen
+inside the asserted replay interval. Stable lifecycle kinds keep replay eligibility
+independent of diagnostic wording, with compatibility for older reports.
+
+PR #11 was merged, the signed release installed in Applications, and both private
+horn cases passed using its bundled replay executable. The app reopened Ready with
+the owner's score, existing cadenza and 20% tolerance. All 16 original music,
+take, diagnostic and configuration files matched their pre-install hashes;
+preferences were semantically unchanged. The selected microphone was unavailable
+during the UI check, so fresh installed-app microphone capture was not tested.
+Reconnect/select the intended microphone before rehearsal. Optional diagnostic
+audio remained off, matching the owner's current setting.
