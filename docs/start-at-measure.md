@@ -31,3 +31,25 @@ PerformanceModel interfaces: selected-tempo preparation; source audio/click
 alignment; invalid input; backward restart; waits/free passages/cadenzas; and
 unchanged behavior starting from measure 1. The owner delegates these engineering
 choices, so no product decision or technical-seam approval is needed.
+
+## Verification on November 17, 2026
+
+All 163 tests passed on the final code, with four opt-in hardware tests skipped.
+All 43 focused release checks passed, including ten measure-start scenarios.
+Independent standards and specification reviews cleared after regressions covered
+slightly early held entrances, tied notes crossing the selected start, and carried
+notes entering free time during ordinary playback.
+
+The signed app was installed and checked with the owner's score. The field loaded
+as 1; Go selected 48, Enter selected 32, and muted live playback completed the
+preparation and advanced through the selected passage. The microphone started.
+Invalid 0 retained the paused performance and displayed the valid 1–206 range.
+Go and Reset then left the app Ready at 32 with two preparation measures.
+Volume was restored to its pre-test value and Blackhole & Headphones remained
+selected. All 29 original asset hashes and the semantic preferences matched the
+pre-install snapshot, including the owner's current 30% tolerance.
+
+No horn performance was used in the muted UI check; tracking loss without played
+notes was expected and produced a local report without audio. Musical response
+with the horn remains for rehearsal. The start selection is session-local and
+defaults to 1 when exports are loaded or the app is reopened.
