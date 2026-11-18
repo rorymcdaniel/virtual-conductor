@@ -293,7 +293,13 @@ final class SoloFollowingTests: XCTestCase {
             following.observe(pitch: pitch, time: now+0.02)
             now += 0.02; following.tick()
             XCTAssertEqual(following.status.rawValue, index < 2 ? "Holding tempo" : "Following")
+            XCTAssertTrue(following.hasRecentPitchMatch)
         }
+        now += 0.7; audio.sourcePosition = now; following.tick()
+        XCTAssertEqual(following.status, .holding)
+        XCTAssertFalse(following.hasRecentPitchMatch)
+        now += 1; audio.sourcePosition = now; following.tick()
+        XCTAssertEqual(following.status, .lost)
     }
 
     func testUncertainForwardMatchHoldsPlaybackInsteadOfChasingPosition() async throws {

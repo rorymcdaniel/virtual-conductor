@@ -159,7 +159,7 @@ struct FollowingBanner: View {
             .foregroundStyle(following.status == .lost ? Color.white : Color.black)
             .frame(width: 280, alignment: .leading)
             .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(following.status == .lost ? Color.red : following.status == .following ? Color.mint.opacity(0.85) : Color.yellow,
+            .background(backgroundColor,
                         in: RoundedRectangle(cornerRadius: 14))
             // A separate top row keeps every state clear of the conducting path
             // and the rest/entrance cues. Fixed dimensions prevent status changes
@@ -168,6 +168,14 @@ struct FollowingBanner: View {
             .padding(.horizontal, 24).padding(.vertical, 8)
             .allowsHitTesting(false)
             .accessibilityElement(children: .combine)
+        }
+    }
+    private var backgroundColor: Color {
+        switch following.status {
+        case .lost: .red
+        case .following: .mint.opacity(0.85)
+        case .holding where following.hasRecentPitchMatch: .mint.opacity(0.85)
+        default: .yellow
         }
     }
     private var icon: String {

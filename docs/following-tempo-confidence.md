@@ -88,3 +88,26 @@ opened Ready with the owner's score, solo staff, following setting, and output
 selection restored. The 36 checked local data/export files were unchanged and
 preferences were semantically unchanged (the recent-rehearsal JSON was re-encoded).
 A new microphone/headphone rehearsal has not been performed for this change.
+
+## Frequent yellow holds in the first-page rehearsal (2026-11-18)
+
+The 11:18 rehearsal reached measure 57 with ±30% tempo tolerance. In the saved
+excerpts, the controller spent about 50 seconds holding tempo during accompanied
+playing while a pitch match was less than 0.2 seconds old. Position recognition can continue while the controller
+waits for enough consistent attacks to change the orchestra's pace.
+
+The run also logged 49 recognition timing resets, 24 of them within 25 ms of
+the preceding reset. The earlier implementation compared microphone sample count
+with the time the UI polled for audio. Delaying one read of an intact synthetic
+phrase by 60 ms reproduced two resets and left its last note in Holding tempo.
+On the Scarlett 2i2 at 48 kHz, a check with occasional delayed reads delivered
+112 batches with continuous capture timestamps. The previous calculation would
+have reset ten times. The original reports lack individual tap timestamps, so
+which rehearsal resets represented real input gaps remains unknown.
+
+The live input now publishes complete blocks with their capture timestamps.
+The regression checks recognition of all four synthetic attacks and recovery of
+Following status. Separate checks cover gaps inside and between batches, stale
+input at a wait, and queue overflow. The banner keeps a recent pitch match mint
+while showing Holding tempo, and turns yellow as the app listens for a missing
+match. A new horn rehearsal is still needed to measure the effect across the page.

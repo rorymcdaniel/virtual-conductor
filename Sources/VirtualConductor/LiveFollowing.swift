@@ -58,6 +58,7 @@ extension InputCapture: FollowingInput {}
     private var analysisSamples = 0
     private var analyzing = false
     private var generation: UInt64 = 0
+    var hasRecentPitchMatch: Bool { lastTick - tracker.lastMatch < FollowingTempo.recentMatchWindow }
     var completed: (() -> Void)?
     var failed: ((String) -> Void)?
 
@@ -247,7 +248,8 @@ extension InputCapture: FollowingInput {}
                 } else if writtenRest {
                     status = .following; detail = "Written solo rest · keeping the pulse"
                 } else if input.isHolding {
-                    status = .holding; detail = "Listening for a steady phrase · within ±\(Int(tolerance))%"
+                    status = .holding
+                    detail = hasRecentPitchMatch ? "Matching your notes · keeping the current tempo" : "Listening for your next matching note"
                 } else {
                     status = .following; detail = "Following within ±\(Int(tolerance))%"
                 }
