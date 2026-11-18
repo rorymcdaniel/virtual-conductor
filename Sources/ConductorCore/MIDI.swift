@@ -155,6 +155,7 @@ public struct MIDIFile: Codable, Sendable {
         let s = segment(at: seconds, key: \.seconds)
         return s.quarter + (seconds - s.seconds) / s.secondsPerQuarter
     }
+    public func tempo(atQuarter quarter: Double) -> Double { 60 / segment(at: quarter, key: \.quarter).secondsPerQuarter }
     public func tempo(atSeconds seconds: Double) -> Double { 60 / segment(at: seconds, key: \.seconds).secondsPerQuarter }
 }
 
@@ -195,4 +196,55 @@ private struct MIDIReader {
         }
         throw MusicalError("Invalid MIDI event length.")
     }
+}
+
+/// Merge local quarter-note BPM markings into the exported tempo events.
+public extension MIDIFile {
+    func practiceTempoBoundaries(score: MusicXMLScore?) -> Set<Double> {
+        let exported = Set(segments.map(\.quarter))
+        guard let score else { return exported }
+        func tick(_ q: Double) -> Double { (q * Double(ppqn)).rounded() / Double(ppqn) }
+        let explicit = score.writtenTempoQuarters.map(tick).filter { $0 >= 0 && $0 < endQuarter }
+        let directions = exported.intersection(score.tempoDirectionQuarters.map(tick))
+        let written = directions.union(explicit)
+        return written.isEmpty ? exported : written.union([0])
+    }
+
+    func applyingTempoMarks(_ marks: [PracticeTempoMark], boundaries: Set<Double>) throws -> MIDIFile {
+        guard !marks.isEmpty else { return self }
+        var local: [Double: Double] = [:]
+        for mark in marks {
+            guard mark.quarter.isFinite, mark.quarter >= 0, mark.quarter < endQuarter,
+                  mark.bpm.isFinite, mark.bpm > 0 else { throw MusicalError("Choose a position within the piece and a positive tempo.") }
+            local[mark.quarter] = mark.bpm
+        }
+        let positions = Set(segments.map(\.quarter)).union(boundaries).union(local.keys)
+        var timeline: [TempoSegment] = []
+        var activeBPM: Double?
+        for quarter in positions.sorted() {
+            if boundaries.contains(quarter) { activeBPM = nil }
+            if let bpm = local[quarter] { activeBPM = bpm }
+            let recorded = segment(at: quarter, key: \.quarter).secondsPerQuarter
+            if let activeBPM {
+                guard (0.25...4).contains(activeBPM * recorded / 60) else {
+                    throw MusicalError("This tempo exceeds the accompaniment’s playback range in this passage (¼× to 4× its recorded tempo).")
+                }
+                // Keep the local pulse through intermediate steps of a written ramp.
+                if local[quarter] == nil { continue }
+            }
+            let seconds = timeline.last.map { $0.seconds + (quarter - $0.quarter) * $0.secondsPerQuarter } ?? 0
+            timeline.append(TempoSegment(quarter: quarter, seconds: seconds, secondsPerQuarter: activeBPM.map { 60 / $0 } ?? recorded))
+        }
+        return MIDIFile(source: self, timeline: timeline)
+    }
+
+    private init(source: MIDIFile, timeline: [TempoSegment]) {
+        ppqn = source.ppqn; tracks = source.tracks; endQuarter = source.endQuarter; segments = timeline
+    }
+}
+
+public struct PracticeTempoMark: Codable, Equatable, Sendable {
+    public let quarter: Double
+    public let bpm: Double
+    public init(quarter: Double, bpm: Double) { self.quarter = quarter; self.bpm = bpm }
 }

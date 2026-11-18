@@ -64,6 +64,8 @@ public struct MusicXMLScore: Sendable {
     /// These ranges are for export validation, not entrances on the written beat grid.
     public let ornamentAttacks: [MIDINote]
     public let staves: [MusicXMLStaff]
+    public let writtenTempoQuarters: Set<Double>
+    public let tempoDirectionQuarters: Set<Double>
     public let measures: [MusicXMLMeasure]
     public var endQuarter: Double { measures.last?.endQuarter ?? 0 }
 
@@ -88,6 +90,8 @@ public struct MusicXMLScore: Sendable {
         guard Set(definitionIDs).count == definitionIDs.count else {
             throw MusicXMLReadError.unsupportedCue(.unestablishedPlayback("Duplicate part IDs."))
         }
+        var writtenTempos = Set<Double>()
+        var tempoDirections = Set<Double>()
         var parsedStaves: [MusicXMLStaff] = []
         var ornaments: [MIDINote] = []
         // Allow up to an eighth note of displacement around an ordinary grace group.
@@ -149,6 +153,22 @@ public struct MusicXMLScore: Sendable {
                                 staffNumbers.append(staff)
                             }
                         }
+                    case "direction", "sound":
+                        let offset = Double(element.child("offset")?.text ?? "0") ?? 0
+                        let q = start + cursor + offset / (divisions ?? 1)
+                        let types = element.children.filter { $0.name == "direction-type" }.flatMap(\.children)
+                        let sound = element.name == "sound" ? element : element.child("sound")
+                        if sound?.attributes["tempo"] != nil || types.contains(where: { $0.name == "metronome" }) {
+                            writtenTempos.insert(q)
+                        }
+                        let words = types.filter { $0.name == "words" }.map(\.text).joined(separator: " ").lowercased()
+                        // MusicXML may encode a MuseScore tempo spanner as plain
+                        // words, with or without a dashed line. Correlate these
+                        // directions with the exported tempo events in MIDI.
+                        let tempoWords = ["rall", "rit.", "ritard", "riten", "accel", "stringendo", "allarg", "calando",
+                                          "morendo", "smorz", "rubato", "stretto", "tempo", "mosso", "ruhiger",
+                                          "breit", "gemächlich", "schneller", "langsamer", "animando", "lentando"]
+                        if tempoWords.contains(where: words.contains) { tempoDirections.insert(q) }
                     case "note", "forward", "backup":
                         if let grace = element.child("grace") {
                             guard element.child("duration") == nil, grace.attributes["make-time"] == nil else {
@@ -275,6 +295,8 @@ public struct MusicXMLScore: Sendable {
             throw MusicXMLReadError.malformed("Missing parts or measures.")
         }
         staves = parsedStaves
+        writtenTempoQuarters = writtenTempos
+        tempoDirectionQuarters = tempoDirections
         ornamentAttacks = ornaments
         measures = parsedMeasures
     }
