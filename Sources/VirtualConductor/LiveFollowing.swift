@@ -128,7 +128,7 @@ extension InputCapture: FollowingInput {}
     private func seconds(_ quarter: Double) -> Double { prepared!.timing.performanceTime(scoreSeconds: prepared!.midi.seconds(atQuarter: quarter)) }
     private func quarter(_ seconds: Double) -> Double {
         let timing = prepared!.timing
-        if seconds < timing.prepSeconds { return (seconds-timing.prepSeconds)/timing.leadSeconds }
+        if seconds < timing.prepSeconds { return timing.startQuarter + (seconds-timing.prepSeconds)/timing.leadSeconds }
         return prepared!.midi.quarter(atSeconds: timing.scoreTime(performanceSeconds: seconds))
     }
 
@@ -138,7 +138,9 @@ extension InputCapture: FollowingInput {}
         if location >= prepared.end - 1e-7 {
             stop(); status = .finished; completed?(); return
         }
-        let q = quarter(location)
+        // Preparation may map near an earlier score passage. Only recognition
+        // uses that score coordinate; transport enters waits/free time after it.
+        let q = location < prepared.timing.prepSeconds ? -Double.infinity : quarter(location)
         if let cadenza = plan.cadenzas.first(where: { q >= $0.startQuarter - 1e-7 && q < $0.returnQuarter - 1e-7 }) {
             if !fromAccompaniment { audio.stop() }
             clearCadenzaAnalysis()
@@ -229,8 +231,8 @@ extension InputCapture: FollowingInput {}
                     } else { try enter(at: audioEnd, fromAccompaniment: true) }
                     return
                 }
+                guard position >= prepared.timing.prepSeconds else { return }
                 let q = quarter(position)
-                guard q >= 0 else { return }
                 let expectingSound = plan.notes.contains { $0.startQuarter <= q && q < $0.endQuarter }
                 writtenRest = !expectingSound
                 let age = now - tracker.lastMatch
@@ -274,16 +276,17 @@ extension InputCapture: FollowingInput {}
                     status = lastPitch == nil && paused ? .waiting : .following
                 }
                 if status == .lost { return }
+                let first = max(prepared.timing.prepSeconds, seconds(range.start))
+                let attack = max(first, seconds(note.startQuarter))
                 if note.endQuarter > range.end + 1e-7 {
-                    position = max(seconds(range.start), min(seconds(range.end), seconds(note.startQuarter) + max(0, now - tracker.lastAttack) * tracker.rate))
+                    position = max(first, min(seconds(range.end), attack + max(0, now - tracker.lastAttack) * tracker.rate))
                     status = .waiting; detail = "Held note crosses the orchestral return · use Right Arrow"
                     return
                 }
-                let attack = seconds(note.startQuarter)
-                position = max(seconds(range.start), min(seconds(min(note.endQuarter, range.end)), attack + max(0, now - tracker.lastAttack) * tracker.rate))
+                position = max(first, min(seconds(min(note.endQuarter, range.end)), attack + max(0, now - tracker.lastAttack) * tracker.rate))
                 if let release = tracker.releasedAt {
                     let next = min(range.end, followingNote?.startQuarter ?? range.end)
-                    position = min(seconds(next), seconds(note.endQuarter) + max(0, now - release))
+                    position = max(first, min(seconds(next), seconds(note.endQuarter) + max(0, now - release)))
                     let needsReturnAttack = followingNote.map { abs($0.startQuarter - range.end) < 1e-7 } ?? false
                     if !needsReturnAttack, next >= range.end, now - release >= max(0, prepared.midi.seconds(atQuarter: range.end) - prepared.midi.seconds(atQuarter: note.endQuarter)) {
                         try returnFromFree(range)

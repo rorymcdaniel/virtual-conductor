@@ -4,6 +4,47 @@ import ConductorCore
 @testable import VirtualConductor
 
 final class MeasureStartTests: XCTestCase {
+    @MainActor func testTiedNoteAcrossChosenStartCannotMoveFreeFollowingBackIntoPreparation() async throws {
+        let base = try FollowingFixture.prepared()
+        let prepared = try PreparedPerformance(midi: base.midi, source: base.source, preparation: 1, passages: [], startMeasure: 3)
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 3, sustainAcrossReturn: true), solo: FollowingFixture.solo,
+            waits: [], freePassages: [PassageRange(start: 0, end: 12)], cadenzas: [])
+        let audio = FollowingTestAudio(), input = FollowingTestInput()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var now = 0.0
+        let following = LiveFollowing(diagnostics: FollowingDiagnostics(root: root), capture: input, clock: { now }, permission: { true })
+        defer { following.stop() }
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        audio.sourcePosition = 2.5; now = 2.5; following.tick()
+        following.observe(pitch: 65, time: 2.52); following.observe(pitch: 65, time: 2.55)
+        now = 2.56; following.tick()
+        XCTAssertGreaterThanOrEqual(following.position, 2.5)
+        XCTAssertEqual(prepared.timing.position(following.position).measure, 3)
+        XCTAssertFalse(prepared.timing.position(following.position).preparing)
+    }
+
+    @MainActor func testSlightlyEarlyHeldEntranceAtSelectedStartReleasesItsWait() async throws {
+        let base = try FollowingFixture.prepared()
+        let prepared = try PreparedPerformance(midi: base.midi, source: base.source, preparation: 1, passages: [], startMeasure: 3)
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo,
+            waits: [WaitPoint(measure: 3, beat: 1)], cadenzas: [])
+        let audio = FollowingTestAudio(), input = FollowingTestInput()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var now = 0.0
+        let following = LiveFollowing(diagnostics: FollowingDiagnostics(root: root), capture: input, clock: { now }, permission: { true })
+        defer { following.stop() }
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        audio.sourcePosition = 2.45; now = 2.45; following.tick()
+        following.observe(pitch: 60, time: 2.45)
+        following.observe(pitch: 60, time: 2.48)
+        XCTAssertEqual(audio.appended.count, 1, "A correct entrance 50 ms early should queue the next buffer")
+        audio.sourcePosition = 2.5; now = 2.5; following.tick()
+        following.observe(pitch: 60, time: 2.51)
+        XCTAssertEqual(following.status, .following)
+    }
+
     func testLongRestCounterKeepsTheOriginalScoreLocationAfterJumping() throws {
         let score = try FollowingFixture.score(soloRestMeasures: [1, 2])
         let schedule = try LongRestSchedule(score: score, staffID: FollowingFixture.solo, threshold: 1)
