@@ -13,12 +13,12 @@ final class CaptureStorage: @unchecked Sendable {
     let receiving = Atomic<Bool>(false)
     let stream: LiveSampleBuffer?
     init(rate: Double, streaming: Bool = false) {
-        stream = streaming ? LiveSampleBuffer() : nil
+        stream = streaming ? LiveSampleBuffer(rate: rate) : nil
         capacity = streaming ? 1 : Int(rate * 120)
         samples = .allocate(capacity:capacity); samples.initialize(repeating:0,count:capacity)
     }
     deinit { samples.deallocate() }
-    func receive(_ buffer: AVReadOnlyAudioPCMBuffer) {
+    func receive(_ buffer: AVReadOnlyAudioPCMBuffer, time: AVAudioTime) {
         receiving.store(true,ordering:.releasing)
         defer { receiving.store(false,ordering:.releasing) }
         guard buffer.format.commonFormat == .pcmFormatFloat32 else { return }
@@ -27,14 +27,21 @@ final class CaptureStorage: @unchecked Sendable {
         var maximum: Float = 0
         let capturing = recording.load(ordering:.acquiring)
         var offset = count.load(ordering:.relaxed)
-        for i in 0..<size {
+        func monoSample(_ i: Int) -> Float {
             var value: Float = 0
             for c in 0..<channelCount {
                 if case .float(let channel) = buffer.channelData(c) { value += channel[i * buffer.stride] }
             }
             value /= Float(channelCount); maximum = max(maximum,abs(value))
-            stream?.write(value)
             if capturing && offset < capacity { samples[offset] = value; offset += 1 }
+            return value
+        }
+        if let stream {
+            let duration = Double(size) / buffer.format.sampleRate
+            let start = time.isHostTimeValid ? AVAudioTime.seconds(forHostTime: time.hostTime) : PerformanceAudio.hostSeconds - duration
+            stream.write(count: size, start: start, sampleTime: time.isSampleTimeValid ? time.sampleTime : nil, sample: monoSample)
+        } else {
+            for i in 0..<size { _ = monoSample(i) }
         }
         if capturing { count.store(offset,ordering:.releasing) }
         peak.store(maximum,ordering:.relaxed)
@@ -85,7 +92,7 @@ final class CaptureStorage: @unchecked Sendable {
         let format = engine.inputNode.outputFormat(forBus:0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw NativeError.message("The selected device has no usable input.") }
         let storage = CaptureStorage(rate:format.sampleRate, streaming: streaming)
-        try engine.inputNode.installAudioTap(onBus:0,bufferSize:streaming ? 256 : 1024,format:format) { buffer, _ in storage.receive(buffer) }
+        try engine.inputNode.installAudioTap(onBus:0,bufferSize:streaming ? 256 : 1024,format:format) { buffer, time in storage.receive(buffer, time: time) }
         // No connection from the microphone to the output mixer: no monitoring.
         engine.prepare()
         do { try engine.start() } catch { engine.inputNode.removeTap(onBus:0); throw error }

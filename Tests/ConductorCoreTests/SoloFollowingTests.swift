@@ -183,13 +183,31 @@ final class SoloFollowingTests: XCTestCase {
         XCTAssertNil(LivePitch.detect(samples: [Float](repeating: 0, count: 3600), sampleRate: rate))
     }
     func testLiveQueueIsBoundedAndRecoversAfterOverflow() {
-        let stream = LiveSampleBuffer()
-        for i in 0..<40000 { stream.write(Float(i)) }
-        let first = stream.drain()
+        let stream = LiveSampleBuffer(rate: 8000)
+        stream.write(count: 32768, start: 0) { Float($0) }
+        stream.write(count: 7232, start: 4.096) { Float($0) }
+        let first = stream.drain()!.samples
         XCTAssertEqual(first.count, 32768); XCTAssertEqual(first.last, 32767)
         XCTAssertEqual(stream.dropped.load(ordering: .acquiring), 7232)
-        stream.write(42); XCTAssertEqual(stream.drain(), [42]); XCTAssertTrue(stream.drain().isEmpty)
+        stream.write(count: 1, start: 5) { _ in 42 }; XCTAssertEqual(stream.drain()?.samples, [42]); XCTAssertNil(stream.drain())
     }
+    func testOnlyAudioAfterTheLastCaptureGapReachesAnalysis() throws {
+        let stream = LiveSampleBuffer(rate: 8000)
+        stream.write(count: 80, start: 1, sampleTime: 0) { _ in 1 }
+        // A missing device block, even with contiguous host timestamps.
+        stream.write(count: 80, start: 1.01, sampleTime: 160) { _ in 2 }
+        stream.write(count: 80, start: 1.02, sampleTime: 240) { _ in 3 }
+        let batch = try XCTUnwrap(stream.drain())
+        XCTAssertTrue(batch.followsGap)
+        XCTAssertEqual(batch.start, 1.01)
+        XCTAssertEqual(batch.samples, Array(repeating: 2, count: 80) + Array(repeating: 3, count: 80))
+        // A host clock gap between drains must still be visible to the consumer.
+        stream.write(count: 80, start: 1.5, sampleTime: 320) { _ in 4 }
+        XCTAssertEqual(stream.drain()?.followsGap, true)
+        stream.write(count: 80, start: 1.51, sampleTime: 400) { _ in 5 }
+        XCTAssertEqual(stream.drain()?.followsGap, false)
+    }
+
     func testRepeatedPitchNeedsArticulationAndOrdinaryDynamicsDoNotInventAttacks() throws {
         let notes = [MIDINote(pitch: 60, startQuarter: 0, endQuarter: 1), MIDINote(pitch: 60, startQuarter: 1, endQuarter: 2)]
         let midi = try FollowingFixture.midi()
@@ -316,10 +334,10 @@ final class SoloFollowingTests: XCTestCase {
             following.observe(pitch: 60, time: 0.5); following.observe(pitch: 60, time: 0.53)
             audio.sourcePosition = 2.5; now = 2.5
             if !discardOnBoundary { following.tick() }
-            for i in 0..<2400 { input.storage?.stream?.write(Float(0.1 * sin(2 * .pi * 261.6256 * Double(i) / 8000))) }
+            input.storage?.stream?.write(count: 2400, start: now) { i in Float(0.1 * sin(2 * .pi * 261.6256 * Double(i) / 8000)) }
             now += 0.3; following.tick()
             for block in 0..<10 {
-                for i in 0..<160 { input.storage?.stream?.write(Float(0.1 * sin(2 * .pi * 261.6256 * Double(block * 160 + i) / 8000))) }
+                input.storage?.stream?.write(count: 160, start: now) { i in Float(0.1 * sin(2 * .pi * 261.6256 * Double(block * 160 + i) / 8000)) }
                 now += 0.02; following.tick()
                 try await Task.sleep(for: .milliseconds(3))
             }
@@ -328,6 +346,43 @@ final class SoloFollowingTests: XCTestCase {
             XCTAssertEqual(audio.played.count, 2)
             following.stop()
         }
+    }
+
+    func testContinuousMicrophonePhraseSurvivesUnevenDelivery() async throws {
+        let input = FollowingTestInput(), audio = FollowingTestAudio(), diagnostics = makeDiagnostics()
+        let prepared = try FollowingFixture.prepared()
+        var now = 1.0
+        let following = LiveFollowing(diagnostics: diagnostics, capture: input, clock: { now }, permission: { true })
+        defer { following.stop() }
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        let storage = CaptureStorage(rate: 8000, streaming: true)
+        input.storage = storage
+        let samples = BeatDetectionFixture.signal(pitches: [60,62,64,65], interval: 0.5, rate: 8000)
+        let format = AVAudioFormat(standardFormatWithSampleRate: input.sampleRate, channels: 1)!
+        for start in stride(from: 0, to: samples.count, by: 800) {
+            let end = min(samples.count, start + 800)
+            let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(end - start)))
+            buffer.frameLength = buffer.frameCapacity
+            for i in start..<end { buffer.floatChannelData![0][i - start] = samples[i] }
+            let capturedAt = AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: 1 + Double(start) / 8000),
+                                         sampleTime: Int64(start), atRate: input.sampleRate)
+            storage.receive(AVReadOnlyAudioPCMBuffer(copying: buffer), time: capturedAt)
+            let deliveryDelay = start == 9600 ? 0.06 : 0
+            now = 1 + Double(end) / 8000 + deliveryDelay
+            audio.sourcePosition = now - 0.5
+            let decisions = diagnostics.report!.decisions.count
+            following.tick()
+            for _ in 0..<100 {
+                if diagnostics.report!.decisions.count > decisions { break }
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            XCTAssertGreaterThan(diagnostics.report!.decisions.count, decisions)
+        }
+        following.tick()
+        XCTAssertEqual(diagnostics.report?.notices.filter { $0.kind == .interruption }.count, 0)
+        XCTAssertEqual(diagnostics.report?.decisions.compactMap(\.matched), [0, 1, 2, 3])
+        XCTAssertEqual(following.status, .following)
     }
 
     func testCaptureGapRebasesClockAndRecoversFreeFollowing() async throws {
@@ -343,7 +398,7 @@ final class SoloFollowingTests: XCTestCase {
             if pitch == 62 { now += 0.8; following.tick() }
             let hz = 440 * pow(2, Double(pitch - 69) / 12)
             for block in 0..<12 {
-                for i in 0..<160 { input.storage?.stream?.write(Float(0.1 * sin(2 * .pi * hz * Double(block * 160 + i) / 8000))) }
+                input.storage?.stream?.write(count: 160, start: now) { i in Float(0.1 * sin(2 * .pi * hz * Double(block * 160 + i) / 8000)) }
                 now += 0.02; following.tick()
                 try await Task.sleep(for: .milliseconds(3))
             }
@@ -364,16 +419,16 @@ final class SoloFollowingTests: XCTestCase {
         input.storage = CaptureStorage(rate: 48000, streaming: true)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()
         func writeTone(_ count: Int) {
-            for i in 0..<count { input.storage?.stream?.write(Float(0.1 * sin(2 * .pi * 261.6256 * Double(i) / 48000))) }
+            input.storage?.stream?.write(count: count, start: now) { i in Float(0.1 * sin(2 * .pi * 261.6256 * Double(i) / 48000)) }
         }
         writeTone(14400); now += 0.3; following.tick()
         try await Task.sleep(for: .milliseconds(10))
         XCTAssertEqual(audio.played.count, 1, "A stale 300 ms batch cannot release the wait")
         let onset = now
         for block in 0..<16 {
-            for i in 0..<256 {
+            input.storage?.stream?.write(count: 256, start: now) { i in
                 let t = Double(block * 256 + i) / 48000
-                input.storage?.stream?.write(Float(0.1 * sin(2 * .pi * 261.6256 * t)))
+                return Float(0.1 * sin(2 * .pi * 261.6256 * t))
             }
             now += 256.0 / 48000; following.tick()
             try await Task.sleep(for: .milliseconds(3))
@@ -396,7 +451,7 @@ final class SoloFollowingTests: XCTestCase {
         let samples = BeatDetectionFixture.signal(pitches: [60,62,64,65,60,62,64,65], interval: 0.125, gap: 0.01, rate: 8000)
         for start in stride(from: 0, to: samples.count, by: 800) {
             let end = min(samples.count, start + 800)
-            for sample in samples[start..<end] { input.storage?.stream?.write(sample) }
+            input.storage?.stream?.write(count: end - start, start: 0.5 + Double(start) / 8000) { samples[start + $0] }
             now = 0.5 + Double(end) / 8000
             following.tick()
             try await Task.sleep(for: .milliseconds(20))
@@ -485,9 +540,9 @@ final class SoloFollowingTests: XCTestCase {
         input.storage = CaptureStorage(rate: 8000, streaming: true)
         audio.sourcePosition = 0.5; now = 0.5; following.tick()
         for block in 0..<6 {
-            for i in 0..<800 {
+            input.storage?.stream?.write(count: 800, start: now) { i in
                 let t = Double(block * 800 + i) / 8000
-                input.storage?.stream?.write(Float(0.1 * sin(2 * .pi * 261.6256 * t) + 0.002 * sin(2 * .pi * 233 * t)))
+                return Float(0.1 * sin(2 * .pi * 261.6256 * t) + 0.002 * sin(2 * .pi * 233 * t))
             }
             now += 0.1; following.tick()
             try await Task.sleep(for: .milliseconds(20))
@@ -630,7 +685,7 @@ final class SoloFollowingTests: XCTestCase {
             let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: prepared.passages)
             try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
             input.storage = CaptureStorage(rate: 8000, streaming: true)
-            for i in 0..<800 { input.storage?.stream?.write(Float(0.1 * sin(2 * .pi * 261.6256 * Double(i)/8000))) }
+            input.storage?.stream?.write(count: 800, start: 0.9) { i in Float(0.1 * sin(2 * .pi * 261.6256 * Double(i)/8000)) }
             // Analysis is launched on the tick that enters the cadenza, then returns late.
             audio.sourcePosition = 1; now = 1; following.tick(); now += 0.5
             if cueImmediately { following.cue() }
@@ -655,7 +710,7 @@ final class SoloFollowingTests: XCTestCase {
         audio.sourcePosition = 1; now = 2; following.tick()
         XCTAssertEqual(following.status, .cadenza)
         input.storage = CaptureStorage(rate: 8000, streaming: true)
-        for _ in 0..<2400 { input.storage?.stream?.write(0.1) }
+        input.storage?.stream?.write(count: 2400, start: now) { _ in 0.1 }
         now += 0.3; following.tick()
         XCTAssertEqual(following.status, .cadenza, "Microphone recovery must not hide the manual cadenza")
         XCTAssertEqual(following.position, 1)

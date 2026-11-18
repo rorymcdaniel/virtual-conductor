@@ -59,12 +59,13 @@ final class AudioContractTests: XCTestCase {
         let format = AVAudioFormat(standardFormatWithSampleRate:rate,channels:2)!
         let block = AVAudioPCMBuffer(pcmFormat:format,frameCapacity:128)!; block.frameLength = 128
         for i in 0..<128 { block.floatChannelData![0][i] = i < 10 ? 0 : 0.6; block.floatChannelData![1][i] = i < 10 ? 0 : 0.2 }
-        storage.receive(AVReadOnlyAudioPCMBuffer(copying: block)); XCTAssertEqual(storage.count.load(ordering:.acquiring),0)
+        let input = AVReadOnlyAudioPCMBuffer(copying: block), timestamp = AVAudioTime(hostTime: 0)
+        storage.receive(input, time: timestamp); XCTAssertEqual(storage.count.load(ordering:.acquiring),0)
         storage.recording.store(true,ordering:.releasing)
-        storage.receive(AVReadOnlyAudioPCMBuffer(copying: block))
+        storage.receive(input, time: timestamp)
         XCTAssertEqual(storage.count.load(ordering:.acquiring),128)
         XCTAssertEqual(storage.samples[0],0); XCTAssertEqual(storage.samples[10],0.4,accuracy:1e-6)
-        for _ in 0..<100 { storage.receive(AVReadOnlyAudioPCMBuffer(copying: block)) }
+        for _ in 0..<100 { storage.receive(input, time: timestamp) }
         XCTAssertEqual(storage.count.load(ordering:.acquiring),12000)
     }
     @MainActor func testUtilitySuspensionClosesSheetAndCancelsStartingState() {

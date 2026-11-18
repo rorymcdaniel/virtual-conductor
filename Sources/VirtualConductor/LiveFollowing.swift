@@ -55,7 +55,6 @@ extension InputCapture: FollowingInput {}
     private var lastObservation = 0.0
     private var droppedSamples = 0
     private var analyzer: SoloAudioAnalyzer?
-    private var analysisOrigin: Double?
     private var analysisSamples = 0
     private var analyzing = false
     private var generation: UInt64 = 0
@@ -119,7 +118,7 @@ extension InputCapture: FollowingInput {}
     func stop() {
         if active { diagnostics.notice("Following stopped", time: clock(), kind: .stopped) }
         generation &+= 1; capture.release(); active = false; analyzing = false
-        analyzer = nil; analysisOrigin = nil; analysisSamples = 0
+        analyzer = nil; analysisSamples = 0
         level = 0; lastPitch = nil; lastObservation = 0
         if let audio { audio.stop(); audio.setRate(1) }
         self.audio = nil; buffers = [:]; boundaries = []; queuedEnd = nil
@@ -300,18 +299,19 @@ extension InputCapture: FollowingInput {}
         // manual free time. A late result must not reset the indicator or steer
         // the newly cued orchestral return.
         generation &+= 1; analyzing = false
-        analyzer = nil; analysisOrigin = nil; analysisSamples = 0
+        analyzer = nil; analysisSamples = 0
         lastPitch = nil; lastObservation = clock()
         _ = capture.storage?.stream?.drain()
         droppedSamples = capture.storage?.stream?.dropped.load(ordering: .acquiring) ?? 0
         diagnostics.audioDiscontinuity()
     }
 
-    private func resetAnalysis() {
-        diagnostics.preserveIncident("Audio delivery discontinuity", time: clock())
+    private func resetAnalysis(_ reason: String) {
+        let now = clock()
+        diagnostics.notice("Audio delivery discontinuity: " + reason, time: now, kind: .interruption)
+        diagnostics.preserveIncident(reason, time: now)
         diagnostics.audioDiscontinuity()
-        diagnostics.notice("Audio delivery discontinuity; recognition timing reset", time: clock(), kind: .interruption)
-        analyzer = nil; analysisOrigin = nil; analysisSamples = 0; status = .lost
+        analyzer = nil; analysisSamples = 0; status = .lost
         // Keep sounding identity even immediately before a wait boundary:
         // discarding timing must never turn a held note into a new attack.
         if let plan, let prepared { tracker.reset(notes: plan.notes, quarter: max(prepared.timing.startQuarter, quarter(position)), preservingSound: true) }
@@ -322,29 +322,28 @@ extension InputCapture: FollowingInput {}
         level = storage.peak.load(ordering: .relaxed)
         guard !analyzing, let stream = storage.stream else { return }
         let dropped = stream.dropped.load(ordering: .acquiring)
-        let incoming = stream.drain()
-        // Discontinuities invalidate both the sample clock and phrase timing.
-        // Never let stale audio release a wait or cue an orchestral return.
-        if dropped != droppedSamples || Double(incoming.count) / capture.sampleRate > 0.25 {
-            droppedSamples = dropped; resetAnalysis()
+        let batch = stream.drain()
+        if dropped != droppedSamples {
+            droppedSamples = dropped; resetAnalysis("Microphone sample queue overflowed")
             return
         }
-        guard !incoming.isEmpty else { return }
-        if let origin = analysisOrigin {
-            let sampleEnd = origin + Double(analysisSamples + incoming.count) / capture.sampleRate
-            // A missing delivery must not leave every later observation behind
-            // the transport clock. Normal tap/UI scheduling jitter stays below
-            // this allowance; accumulated contiguous batches retain their clock.
-            if abs(now - sampleEnd) > 0.04 { resetAnalysis() }
+        guard let batch else { return }
+        let incoming = batch.samples
+        let duration = Double(incoming.count) / capture.sampleRate
+        let sampleEnd = batch.start + duration
+        guard duration <= 0.25, abs(now - sampleEnd) <= 0.25 else {
+            resetAnalysis("Microphone audio was stale or backlogged")
+            return
         }
-        if analyzer == nil {
-            analyzer = SoloAudioAnalyzer(sampleRate: capture.sampleRate)
-            analysisOrigin = now - Double(incoming.count) / capture.sampleRate
-        }
-        diagnostics.capture(incoming, start: analysisOrigin! + Double(analysisSamples) / capture.sampleRate)
+        if batch.followsGap { resetAnalysis("Gap in microphone timestamps") }
+        let processor = analyzer ?? SoloAudioAnalyzer(sampleRate: capture.sampleRate)
+        // The analyzer counts samples across calls. Map this batch onto the
+        // microphone clock even if its delivery or the UI tick ran late.
+        let origin = batch.start - Double(analysisSamples) / capture.sampleRate
+        diagnostics.capture(incoming, start: batch.start)
         analysisSamples += incoming.count
         analyzing = true
-        let processor = analyzer!, origin = analysisOrigin!, token = generation
+        let token = generation
         Task {
             let (updated, observations) = await Task.detached(priority: .userInitiated) {
                 var updated = processor
@@ -353,8 +352,8 @@ extension InputCapture: FollowingInput {}
             }.value
             guard token == generation, active else { return }
             analyzing = false
-            guard clock() - now < 0.25 else {
-                resetAnalysis()
+            guard clock() - sampleEnd < 0.25 else {
+                resetAnalysis("Microphone analysis arrived late")
                 return
             }
             analyzer = updated
