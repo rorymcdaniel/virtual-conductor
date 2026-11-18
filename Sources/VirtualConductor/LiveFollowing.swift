@@ -277,7 +277,7 @@ extension InputCapture: FollowingInput {}
                 }
                 if status == .lost { return }
                 let first = max(prepared.timing.prepSeconds, seconds(range.start))
-                let attack = max(first, seconds(note.startQuarter))
+                let attack = seconds(note.startQuarter)
                 if note.endQuarter > range.end + 1e-7 {
                     position = max(first, min(seconds(range.end), attack + max(0, now - tracker.lastAttack) * tracker.rate))
                     status = .waiting; detail = "Held note crosses the orchestral return · use Right Arrow"

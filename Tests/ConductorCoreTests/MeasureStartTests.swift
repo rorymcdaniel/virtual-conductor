@@ -4,6 +4,25 @@ import ConductorCore
 @testable import VirtualConductor
 
 final class MeasureStartTests: XCTestCase {
+    @MainActor func testCarriedHeldNoteKeepsItsTimingWhenNormalPlaybackEntersFreePassage() async throws {
+        let prepared = try FollowingFixture.prepared()
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 1, silentFrom: 2, sustainAcrossReturn: true), solo: FollowingFixture.solo,
+            waits: [], freePassages: [PassageRange(start: 8, end: 12)], cadenzas: [])
+        let audio = FollowingTestAudio(), input = FollowingTestInput()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var now = 0.0
+        let following = LiveFollowing(diagnostics: FollowingDiagnostics(root: root), capture: input, clock: { now }, permission: { true })
+        defer { following.stop() }
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        audio.sourcePosition = 4; now = 4; following.tick()
+        following.observe(pitch: 65, time: 4); following.observe(pitch: 65, time: 4.03)
+        following.observe(pitch: 65, time: 4.48)
+        audio.sourcePosition = 4.5; now = 4.5; following.tick()
+        now = 4.51; following.tick()
+        XCTAssertEqual(following.position, 4.51, accuracy: 0.04, "Carrying a held note into free time must not add its elapsed time twice")
+    }
+
     @MainActor func testTiedNoteAcrossChosenStartCannotMoveFreeFollowingBackIntoPreparation() async throws {
         let base = try FollowingFixture.prepared()
         let prepared = try PreparedPerformance(midi: base.midi, source: base.source, preparation: 1, passages: [], startMeasure: 3)

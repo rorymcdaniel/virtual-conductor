@@ -12,11 +12,19 @@ start and gives preparation again. Invalid measure numbers leave the existing
 position intact. Changing the start does not edit the score, MIDI/WAV exports,
 recorded takes, cadenza/wait settings, or tempo tolerance.
 
+Use **Start at measure → Go → Start**. Enter also applies the measure. New exports
+default to measure 1. Changing preparation or cadenza settings keeps the selected
+start. The new control is disabled during playback; pause first to move elsewhere.
+
 Both fixed playback and live following must use the same score position. Earlier
 waits and cadenzas are bypassed. A start within a manual cadenza prepares first,
 then waits for the existing pedal return. A start inside a free-following passage
 prepares first, then listens from the chosen measure. Long-rest cues and displayed
 measure numbers continue to refer to the original score.
+
+Recognition retains a slightly early entrance across the chosen downbeat without
+letting earlier waits/cadenzas interrupt preparation. A tied note that began before
+the selected measure cannot move the displayed position back into the count-in.
 
 Verification uses the existing timing, PreparedPerformance, LiveFollowing, and
 PerformanceModel interfaces: selected-tempo preparation; source audio/click
