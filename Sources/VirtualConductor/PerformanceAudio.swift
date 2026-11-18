@@ -134,6 +134,7 @@ final class PreparedPerformance {
     private var format: AVAudioFormat?
     private var configuration: UInt64 = 0
     private var hardwareOutput: HardwareOutput?
+    var renderDelay: Double { hardwareOutput?.renderDelay ?? 0 }
     var boundOutputID: AudioDeviceID { hardwareOutput?.unit.deviceID ?? AudioDevices.boundID(engine.outputNode) }
     private var outputLatency: Double { hardwareOutput?.presentationLatency ?? engine.outputNode.presentationLatency }
     nonisolated static var hostSeconds: Double { AVAudioTime.seconds(forHostTime: mach_absolute_time()) }
@@ -158,10 +159,8 @@ final class PreparedPerformance {
         try engine.connectNode(auxiliary, to: engine.mainMixerNode, format: AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1))
         self.device = device; self.format = format
         engine.mainMixerNode.outputVolume = volume; clicks.volume = clicksEnabled ? 1 : 0
-        do {
-            engine.prepare(); try engine.start(); try hardwareOutput?.start()
-        } catch { shutdown(); throw error }
-        guard boundOutputID == device.id else { shutdown(); throw NativeError.message("Output binding changed unexpectedly. Select an output again.") }
+        engine.prepare(); try engine.start(); try hardwareOutput?.start()
+        guard boundOutputID == device.id else { throw NativeError.message("Output binding changed unexpectedly. Select an output again.") }
         let identity = configuration
         notification = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in Task { @MainActor in guard let self, self.configuration == identity else { return }; self.interrupted?() } }
         configured = true

@@ -7,6 +7,7 @@ import Synchronization
 final class OutputRenderStart: Sendable {
     let failed = Atomic<Bool>(false)
     let host = Atomic<UInt64>(0)
+    let deferredFrames = Atomic<Int>(0)
 }
 
 /// Drives the existing playback graph through a HAL output unit, bypassing
@@ -64,6 +65,7 @@ final class OutputRenderStart: Sendable {
             let result = render(frames, buffers, &error)
             if result != .success {
                 clear()
+                if result == .cannotDoInCurrentContext { start.deferredFrames.wrappingAdd(Int(frames), ordering: .relaxed) }
                 if result == .error { start.failed.store(true, ordering: .releasing) }
             }
             return noErr
@@ -85,4 +87,5 @@ final class OutputRenderStart: Sendable {
         AudioDevices.objectIDs(deviceID, selector: kAudioAggregateDevicePropertyActiveSubDeviceList) == subdevices
     }
     var presentationLatency: Double { AudioDevices.outputPresentationLatency(deviceID, sampleRate: format.sampleRate) }
+    var renderDelay: Double { Double(renderStart.deferredFrames.load(ordering: .relaxed)) / format.sampleRate }
 }

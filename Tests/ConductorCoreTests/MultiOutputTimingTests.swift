@@ -79,5 +79,26 @@ final class MultiOutputTimingTests: XCTestCase {
             XCTAssertTrue(audio.ready)
             audio.stop()
         }
+        observed.first.store(0, ordering: .releasing); observed.last.store(0, ordering: .releasing)
+        audio.setRate(1)
+        let deferredBefore = audio.renderDelay
+        try audio.play(segment, immediate: false)
+        for _ in 0..<9 { audio.append(segment) }
+        var predictedEnd = audio.audibleOrigin + segment.position + 3
+        for i in 0..<210 {
+            try await Task.sleep(for: .milliseconds(15))
+            // Match the live controller cadence, including unchanged writes.
+            let rate = i < 65 ? 1.0 : (i < 125 ? 1.2 : 0.8)
+            audio.setRate(rate)
+            let remaining = max(0, segment.position + 3 - audio.position())
+            if remaining > 0 { predictedEnd = PerformanceAudio.hostSeconds + remaining/rate }
+        }
+        try await Task.sleep(for: .milliseconds(400))
+        let last = observed.last.load(ordering: .acquiring)
+        print("[route-timing] continuous tempo updates: deferredSeconds=\(audio.renderDelay-deferredBefore) endError=\(last-predictedEnd)")
+        XCTAssertLessThan(audio.renderDelay-deferredBefore, 0.02, "Live rate updates must not repeatedly reject rendering")
+        XCTAssertEqual(last, predictedEnd, accuracy: 0.06, "Live tempo changes and appended buffers must preserve the audible transport clock")
+        XCTAssertTrue(audio.ready)
+        audio.stop()
     }
 }

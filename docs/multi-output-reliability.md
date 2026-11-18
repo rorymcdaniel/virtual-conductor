@@ -55,3 +55,8 @@ after time stretching at 80% and 120%, audible origin, and stretched duration us
 a 44.1 kHz source on the 48 kHz device. Capture must be receiving before measuring.
 These checks establish routing and timing, not musical quality of live following
 with the owner's horn; that remains a rehearsal check.
+
+The loopback also appends ten buffers and updates the tempo every 15 ms during
+playback, including unchanged-rate updates. It checks audible completion against
+the transport and counts frames deferred by realtime engine contention. This
+catches gaps/clock drift that a route-only test or pre-start rate change misses.
