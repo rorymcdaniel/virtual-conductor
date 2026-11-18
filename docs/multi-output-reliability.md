@@ -42,7 +42,7 @@ python3 Scripts/check-multi-output.py 'Blackhole & Headphones' --loopback 'Black
 ```
 
 The script builds with warnings as errors, then runs the actual production path
-under a separate 20-second process watchdog. A main-thread freeze cannot be caught
+under a separate 35-second process watchdog. A main-thread freeze cannot be caught
 by an ordinary XCTest elapsed-time assertion. Device switching is silent. The
 optional loopback check plays short quiet synthesized tones and requires existing
 capture authorization. It stores no audio. Run it only when the owner is stopped.
@@ -60,6 +60,16 @@ The loopback also appends ten buffers and updates the tempo every 15 ms during
 playback, including unchanged-rate updates. It checks audible completion against
 the transport and counts frames deferred by realtime engine contention. This
 catches gaps/clock drift that a route-only test or pre-start rate change misses.
+It also marks measures 70 and 72 with synthesized tones, selects start 72 with two
+preparation measures, and checks their audible timing both on a fresh start and
+when resuming partway through preparation.
+
+Fresh starts and resumes reset the time-pitch processor before scheduling audio.
+A measure-72 loopback regression found about 167 ms of retained delay after tempo
+changes; resetting that processor reduced the measured preparation/resume errors
+to 12 ms or less. Adjacent appended buffers and live tempo updates remain
+continuous. This resets processing state only, without changing the selected
+output, source audio, or tempo settings.
 
 ## Verification on November 17, 2026
 

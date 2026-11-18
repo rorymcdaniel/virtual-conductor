@@ -100,5 +100,34 @@ final class MultiOutputTimingTests: XCTestCase {
         XCTAssertEqual(last, predictedEnd, accuracy: 0.06, "Live tempo changes and appended buffers must preserve the audible transport clock")
         XCTAssertTrue(audio.ready)
         audio.stop()
+
+        // Mark measures 70 and 72 with short tones in a longer source. Both the
+        // preparation and a resume inside it must retain their original timing.
+        let midi = try FollowingFixture.midi(quarters: 304)
+        let source = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: UInt32(midi.duration * 44100))!
+        source.frameLength = source.frameCapacity
+        for c in 0..<2 {
+            source.floatChannelData![c].initialize(repeating: 0, count: Int(source.frameLength))
+            for quarter in [276.0, 284] {
+                let frame = Int((midi.seconds(atQuarter: quarter) * 44100).rounded())
+                source.floatChannelData![c].advanced(by: frame).update(from: tone.floatChannelData![c], count: Int(tone.frameLength))
+            }
+        }
+        let prepared = try PreparedPerformance(midi: midi, source: source, preparation: 2, passages: [], startMeasure: 72)
+        for (position, firstTone, wait) in [(0.0, 0.5, 5.5), (1.25, 4.5, 4.25)] {
+            let segment = try PreparedPerformance.makeSegment(source: source, timing: prepared.timing,
+                                                              position: position, end: prepared.end)
+            observed.first.store(0, ordering: .releasing); observed.last.store(0, ordering: .releasing)
+            audio.setRate(1)
+            try audio.play(segment, immediate: false)
+            let origin = audio.audibleOrigin
+            try await Task.sleep(for: .seconds(wait))
+            let first = observed.first.load(ordering: .acquiring), last = observed.last.load(ordering: .acquiring)
+            print("[route-timing] measure72 position=\(position) preparationOnsetError=\(first-origin-firstTone) selectedMeasureEndError=\(last-origin-4.8)")
+            XCTAssertGreaterThan(first, 0)
+            XCTAssertEqual(first, origin + firstTone, accuracy: 0.055)
+            XCTAssertEqual(last, origin + 4.8, accuracy: 0.06)
+            audio.stop()
+        }
     }
 }

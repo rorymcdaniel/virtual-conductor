@@ -17,6 +17,7 @@ public struct PerformanceTiming: Sendable {
     public let startSeconds: Double
     public let startingBPM: Double
     public let prepBeats: Int
+    public let preparationStartQuarter: Double
     public let leadSeconds: Double
     public let prepSeconds: Double
     public let musicalEnd: Double
@@ -31,8 +32,12 @@ public struct PerformanceTiming: Sendable {
         startSeconds = midi.seconds(atQuarter: startQuarter)
         startingBPM = midi.tempo(atSeconds: startSeconds)
         prepBeats = preparatoryMeasures * 4
-        leadSeconds = 60 / startingBPM
-        prepSeconds = leadSeconds + Double(prepBeats) * leadSeconds
+        preparationStartQuarter = startQuarter - Double(prepBeats)
+        // Preparation is the preceding score passage. Negative quarters provide
+        // a silent count-in at the opening tempo when it extends before bar 1.
+        let preparationStartSeconds = midi.seconds(atQuarter: preparationStartQuarter)
+        leadSeconds = 60 / midi.tempo(atSeconds: preparationStartSeconds)
+        prepSeconds = leadSeconds + startSeconds - preparationStartSeconds
         musicalEnd = prepSeconds + midi.duration - startSeconds
         totalBeats = prepBeats + Int(ceil(midi.endQuarter - startQuarter))
     }
@@ -41,20 +46,18 @@ public struct PerformanceTiming: Sendable {
     public func scoreTime(performanceSeconds: Double) -> Double { performanceSeconds - prepSeconds + startSeconds }
 
     public func beatTime(_ beat: Int) -> Double {
-        beat < prepBeats ? leadSeconds + Double(beat) * leadSeconds : performanceTime(scoreSeconds: midi.seconds(atQuarter: startQuarter + Double(beat - prepBeats)))
+        performanceTime(scoreSeconds: midi.seconds(atQuarter: preparationStartQuarter + Double(beat)))
     }
 
     public func position(_ time: Double) -> ConductingPosition {
         if time < leadSeconds {
-            return ConductingPosition(beat: 3, f: max(0, time) / leadSeconds, measure: nil, preparing: true, leadIn: true, ended: false, bpm: startingBPM)
+            return ConductingPosition(beat: 3, f: max(0, time) / leadSeconds, measure: nil, preparing: true, leadIn: true, ended: false, bpm: 60 / leadSeconds)
         }
-        if time < prepSeconds {
-            let quarter = (time - leadSeconds) / leadSeconds
-            return ConductingPosition(beat: Int(floor(quarter)) % 4, f: quarter.truncatingRemainder(dividingBy: 1), measure: Int(floor(quarter / 4)) - prepBeats / 4, preparing: true, leadIn: false, ended: false, bpm: startingBPM)
-        }
-        let seconds = max(startSeconds, scoreTime(performanceSeconds: time))
-        let raw = max(0, midi.quarter(atSeconds: seconds)), nearest = raw.rounded()
+        let seconds = scoreTime(performanceSeconds: time)
+        let raw = midi.quarter(atSeconds: seconds), nearest = raw.rounded()
         let quarter = min(midi.endQuarter - 1e-8, abs(raw - nearest) < 1e-9 ? nearest : raw)
-        return ConductingPosition(beat: Int(floor(quarter)) % 4, f: quarter.truncatingRemainder(dividingBy: 1), measure: Int(floor(quarter / 4)) + 1, preparing: false, leadIn: false, ended: seconds >= midi.duration, bpm: midi.tempo(atSeconds: min(seconds, midi.duration)))
+        return ConductingPosition(beat: (Int(floor(quarter)) % 4 + 4) % 4, f: quarter - floor(quarter),
+            measure: Int(floor(quarter / 4)) + (quarter < 0 ? 0 : 1), preparing: time < prepSeconds,
+            leadIn: false, ended: seconds >= midi.duration, bpm: midi.tempo(atSeconds: min(seconds, midi.duration)))
     }
 }

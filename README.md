@@ -19,6 +19,13 @@ Use **Load new exports…** to select a matching MIDI/WAV pair and optional matc
 
 Space plays/pauses, H shows/hides controls, and Right Arrow resumes from a configured cadenza wait. Text entry and modal utilities block performance shortcuts. The app remembers explicitly selected output and microphone devices without changing system defaults. If a selected device is unavailable, reconnect or choose another in the app. Recording uses a separate input engine without monitoring; microphone permission is requested when enabling input.
 
+To restart a passage, use **Start at measure → Go → Start**. Preparation plays the
+preceding measures: start 72 with two preparation measures plays 70 and 71, then
+continues into 72. The display and clicks follow those measures' tempo map. Only
+the upbeat and any preparation before measure 1 are silent. Pause/Resume continues
+from the paused position; Reset returns to the chosen start with preparation again.
+See [starting at a measure](docs/start-at-measure.md).
+
 Cadenza settings are stored in `~/Library/Application Support/VirtualConductor/cadenzas-v1.json`, keyed by exact MIDI SHA-256. Browser settings can be imported explicitly through the versioned JSON bridge. Changed MIDI does not inherit old boundaries. Native cadenza boundaries accept subdivisions such as beat 1.5. The orchestra’s release can ring briefly after the boundary while the cadenza indicator waits for the pedal; see [cadenza handoff behavior](docs/cadenza-rubato-handoff.md).
 
 ## Recorded-performance timing

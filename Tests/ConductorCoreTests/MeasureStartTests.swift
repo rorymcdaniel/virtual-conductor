@@ -4,6 +4,44 @@ import ConductorCore
 @testable import VirtualConductor
 
 final class MeasureStartTests: XCTestCase {
+    func testMeasure72PreparationPlaysMeasures70And71AndResumesAtTheSameAudioPosition() throws {
+        let midi = try FollowingFixture.midi(quarters: 304), rate = 8000.0
+        let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1)!
+        let source = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: UInt32(midi.duration * rate))!
+        source.frameLength = source.frameCapacity
+        for i in 0..<Int(source.frameLength) { source.floatChannelData![0][i] = Float(i % 997 + 1) / 1000 }
+        let prepared = try PreparedPerformance(midi: midi, source: source, preparation: 2, passages: [], startMeasure: 72)
+        let segment = try XCTUnwrap(prepared.segments.first)
+        let timing = prepared.timing
+        XCTAssertEqual(timing.position(timing.leadSeconds).measure, 70)
+        XCTAssertTrue(timing.position(timing.leadSeconds).preparing)
+        XCTAssertEqual(timing.position(timing.prepSeconds).measure, 72)
+        for (performanceTime, scoreQuarter) in [(0.5, 276.0), (2.5, 280), (4.5, 284), (8.5, 292)] {
+            let destination = Int((performanceTime * rate).rounded())
+            let original = Int((midi.seconds(atQuarter: scoreQuarter) * rate).rounded())
+            XCTAssertEqual(segment.music.floatChannelData![0][destination], source.floatChannelData![0][original],
+                           "Accompaniment must follow the original score during preparation and after the selected start")
+        }
+        let resumed = try PreparedPerformance.makeSegment(source: source, timing: timing, position: 1.25, end: prepared.end)
+        XCTAssertEqual(resumed.music.floatChannelData![0][0], segment.music.floatChannelData![0][10000])
+        XCTAssertGreaterThan(resumed.music.floatChannelData![0][0], 0)
+    }
+
+    func testPreparationBeforeTheScoreIsSilentAndZeroPreparationStartsAtTheChosenMeasure() throws {
+        let base = try FollowingFixture.prepared()
+        base.source.floatChannelData![0].initialize(repeating: 0.25, count: Int(base.source.frameLength))
+        for (start, prep, firstSound, firstMeasure) in [(1, 2, 4.5, 1), (2, 2, 2.5, 1), (3, 0, 0.5, 3)] {
+            let prepared = try PreparedPerformance(midi: base.midi, source: base.source, preparation: prep,
+                                                   passages: [], startMeasure: start)
+            let segment = try XCTUnwrap(prepared.segments.first)
+            let frame = Int(firstSound * 8000)
+            XCTAssertTrue((0..<frame).allSatisfy { segment.music.floatChannelData![0][$0] == 0 })
+            XCTAssertEqual(segment.music.floatChannelData![0][frame], 0.25)
+            XCTAssertEqual(prepared.timing.position(firstSound).measure, firstMeasure)
+            XCTAssertEqual(prepared.timing.position(prepared.timing.prepSeconds).measure, start)
+        }
+    }
+
     @MainActor func testCarriedHeldNoteKeepsItsTimingWhenNormalPlaybackEntersFreePassage() async throws {
         let prepared = try FollowingFixture.prepared()
         let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 1, silentFrom: 2, sustainAcrossReturn: true), solo: FollowingFixture.solo,
@@ -151,6 +189,7 @@ final class MeasureStartTests: XCTestCase {
 
     @MainActor func testLiveStartBypassesEarlierWaitAndWaitsAtChosenMeasureAfterPreparation() async throws {
         let base = try FollowingFixture.prepared()
+        base.source.floatChannelData![0].initialize(repeating: 0.25, count: Int(base.source.frameLength))
         let prepared = try PreparedPerformance(midi: base.midi, source: base.source, preparation: 1, passages: [], startMeasure: 3)
         let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo,
             waits: [WaitPoint(measure: 2, beat: 1), WaitPoint(measure: 3, beat: 1)], cadenzas: [])
@@ -162,6 +201,8 @@ final class MeasureStartTests: XCTestCase {
         defer { following.stop() }
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
         XCTAssertEqual(audio.played.first?.end, 2.5)
+        XCTAssertEqual(audio.played.first?.music.floatChannelData![0][4000], 0.25,
+                       "Live preparation must sound the earlier measure without stopping at its wait point")
         XCTAssertEqual(following.status, .following)
         audio.sourcePosition = 2.5; now = 2.5; following.tick()
         XCTAssertEqual(following.status, .waiting)
@@ -170,7 +211,7 @@ final class MeasureStartTests: XCTestCase {
         XCTAssertEqual(prepared.timing.position(following.position).measure, 3)
     }
 
-    func testLaterTempoAndAudioBeginAfterSilentPreparation() throws {
+    func testPreparationAudioAndClicksFollowThePrecedingTempoMap() throws {
         let url = try XCTUnwrap(Bundle.module.url(forResource: "fractional-tempo", withExtension: "mid", subdirectory: "Fixtures"))
         let midi = try MIDIFile(data: Data(contentsOf: url))
         let format = AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1)!
@@ -181,17 +222,21 @@ final class MeasureStartTests: XCTestCase {
         source.floatChannelData![0][14500] = 0.75
         source.floatChannelData![0][14501] = 0.5
         let prepared = try PreparedPerformance(midi: midi, source: source, preparation: 1, passages: [], startMeasure: 2)
-        XCTAssertEqual(prepared.timing.position(0).bpm, 96)
-        XCTAssertEqual(prepared.timing.prepSeconds, 3.125)
+        XCTAssertEqual(prepared.timing.position(0).bpm, 120)
+        XCTAssertEqual(prepared.timing.prepSeconds, 2.3125)
         let segment = try XCTUnwrap(prepared.segments.first)
-        XCTAssertTrue((0..<25000).allSatisfy { segment.music.floatChannelData![0][$0] == 0 })
-        XCTAssertEqual(segment.music.floatChannelData![0][25000], 0.75)
-        XCTAssertEqual(segment.music.floatChannelData![0][25001], 0.5)
-        XCTAssertNotEqual(segment.clicks.floatChannelData![0][5002], 0)
-        XCTAssertNotEqual(segment.clicks.floatChannelData![0][25002], 0)
-        XCTAssertEqual(prepared.timing.position(3.125).measure, 2)
-        XCTAssertEqual(prepared.timing.musicalEnd, 5.625)
-        XCTAssertEqual(prepared.end, 9.3125)
+        XCTAssertTrue((0..<4000).allSatisfy { segment.music.floatChannelData![0][$0] == 0 })
+        XCTAssertEqual(segment.music.floatChannelData![0][4000], 0.25)
+        XCTAssertEqual(segment.music.floatChannelData![0][18500], 0.75)
+        XCTAssertEqual(segment.music.floatChannelData![0][18501], 0.5)
+        for beat in 0..<prepared.timing.totalBeats {
+            let q = Double(beat), t = 0.5 + midi.seconds(atQuarter: q)
+            XCTAssertEqual(prepared.timing.beatTime(beat), t, accuracy: 1e-9)
+            XCTAssertNotEqual(segment.clicks.floatChannelData![0][Int((t*8000).rounded())+2], 0)
+        }
+        XCTAssertEqual(prepared.timing.position(2.3125).measure, 2)
+        XCTAssertEqual(prepared.timing.musicalEnd, 4.8125)
+        XCTAssertEqual(prepared.end, 8.5)
     }
 
     func testSelectedMeasureReceivesFullPreparationBeforeItsOriginalScorePosition() throws {
@@ -199,8 +244,8 @@ final class MeasureStartTests: XCTestCase {
         let timing = try PerformanceTiming(midi: midi, preparatoryMeasures: 2, startMeasure: 3)
         XCTAssertEqual(timing.prepSeconds, 4.5)
         XCTAssertTrue(timing.position(0).leadIn)
-        XCTAssertEqual(timing.position(0.5).measure, -2)
-        XCTAssertEqual(timing.position(2.5).measure, -1)
+        XCTAssertEqual(timing.position(0.5).measure, 1)
+        XCTAssertEqual(timing.position(2.5).measure, 2)
         XCTAssertEqual(timing.position(4.5).measure, 3)
         XCTAssertEqual(timing.position(4.5).beat, 0)
         XCTAssertEqual(timing.position(6.5).measure, 4)

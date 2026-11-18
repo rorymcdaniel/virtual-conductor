@@ -4,8 +4,13 @@ The owner needs to return to an earlier passage during practice without replayin
 the piece. Provide a whole-measure entry, defaulting to 1 on score load, usable
 while stopped, paused, waiting, or finished. Applying it prepares a fresh start;
 the existing Start button begins playback. Keep the configured preparation count
-and the upbeat, using the selected measure's planned tempo. The accompaniment
-must begin at that measure, with no earlier music during preparation.
+and the upbeat. Preparation plays the preceding score measures with their actual
+MIDI tempo map: selecting measure 72 with two preparation measures plays measures
+70 and 71, then continues directly into 72. The display shows those original
+measure numbers while identifying them as preparation. The upbeat remains silent.
+If preparation extends before measure 1, that portion is a silent count-in at the
+opening tempo; any portion inside the score plays its accompaniment. With zero
+preparation, the selected measure follows the upbeat immediately.
 
 Pause/Resume continues from the current position. Reset returns to the selected
 start and gives preparation again. Invalid measure numbers leave the existing
@@ -27,7 +32,7 @@ letting earlier waits/cadenzas interrupt preparation. A tied note that began bef
 the selected measure cannot move the displayed position back into the count-in.
 
 Verification uses the existing timing, PreparedPerformance, LiveFollowing, and
-PerformanceModel interfaces: selected-tempo preparation; source audio/click
+PerformanceModel interfaces: preparation following the preceding tempo map; source audio/click
 alignment; invalid input; backward restart; waits/free passages/cadenzas; and
 unchanged behavior starting from measure 1. The owner delegates these engineering
 choices, so no product decision or technical-seam approval is needed.
@@ -53,3 +58,36 @@ No horn performance was used in the muted UI check; tracking loss without played
 notes was expected and produced a local report without audio. Musical response
 with the horn remains for rehearsal. The start selection is session-local and
 defaults to 1 when exports are loaded or the app is reopened.
+
+## Preparation audio correction (November 18, 2026)
+
+The previous implementation explicitly silenced preparation and synthesized its
+beats at the selected measure's tempo. The owner clarified that preparation must
+be the preceding music. A regression reproduced the missing audio at measures 70
+and 71 with start 72 and two preparation measures, including resuming within that
+silent region. The owner's WAV contains sounding accompaniment at measures 70–72;
+its score measure numbers agree with the app's linear measure numbers.
+
+Preparation, source audio, clicks, conducting, and recognition now share the MIDI
+timeline. Earlier waits and free passages still cannot stop preparation; following
+begins at the chosen measure. The source audio continues across the selected
+downbeat without a gap, seek, or extra count-in. Tests cover the exact measure-72
+case, resuming partway through preparation, changing tempos before the selected
+start, partial preparation before measure 1, zero preparation, and earlier waits.
+
+The complete suite passed 164 tests, with four opt-in hardware checks skipped.
+The warnings-as-errors build and the separate device-switching/loopback checks
+passed. The loopback checks use the owner's Blackhole & Headphones route and
+synthetic markers at measures 70 and 72, including a resume inside preparation.
+They also exposed retained time-stretch delay after tempo changes; fresh playback
+now resets that processor, reducing the measured start/resume errors from about
+167 ms to at most 12 ms. Continuous playback and live rate-update checks passed.
+
+The signed app was installed and exercised with the owner's exports, following
+enabled, start 72, and two preparation measures. Playback reached the selected
+measure and paused normally; the saved control trace began at the correct
+measure-72 source time. Reset left the app Ready at 72. Original music, takes,
+manual reports, and semantic preferences were unchanged; the app's normal bounded
+automatic-report rotation removed one old automatic report. The three private
+following regressions also passed in the installed executable. No horn performance
+was used for this playback check.

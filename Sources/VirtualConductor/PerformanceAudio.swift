@@ -51,6 +51,7 @@ final class PreparedPerformance {
         let count = max(1, last - first)
         let prepFrame = Int64((timing.prepSeconds * rate).rounded())
         let sourceOrigin = prepFrame - Int64((timing.startSeconds * rate).rounded())
+        let musicStart = max(Int64((timing.leadSeconds * rate).rounded()), sourceOrigin)
         var musicEnd = last
         if let limit = ringOutUntil, last >= prepFrame {
             // Continue the rendered release into a notated rest. Stop looking at the
@@ -70,7 +71,9 @@ final class PreparedPerformance {
         music.frameLength = UInt32(musicCount); clicks.frameLength = UInt32(count)
         for c in 0..<Int(source.format.channelCount) {
             let dest = music.floatChannelData![c]; dest.initialize(repeating: 0, count: Int(musicCount))
-            let from = max(first, prepFrame), to = min(musicEnd, sourceOrigin + Int64(source.frameLength))
+            // Sound the preceding measures during preparation. Only the upbeat
+            // and any count-in before the score's beginning remain silent.
+            let from = max(first, musicStart), to = min(musicEnd, sourceOrigin + Int64(source.frameLength))
             if to > from { dest.advanced(by: Int(from-first)).update(from: source.floatChannelData![c].advanced(by: Int(from-sourceOrigin)), count: Int(to-from)) }
         }
         // Smooth the end of a release even when the safety limit, rather than
@@ -173,6 +176,9 @@ final class PreparedPerformance {
         guard ready else { throw NativeError.message("Output interrupted. Select an output and supply a fresh cue.") }
         stop()
         hardwareOutput?.hold()
+        // A fresh start/resume must not inherit time-stretch buffering from the
+        // previous phrase. Adjacent appended buffers still remain continuous.
+        timePitch.reset()
         // Returns use now, with no startup lead. Preparation/pause starts retain the browser's 200 ms lead.
         let host = Self.hostSeconds + (immediate ? 0 : 0.2)
         let at = hardwareOutput == nil ? AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: host)) : nil

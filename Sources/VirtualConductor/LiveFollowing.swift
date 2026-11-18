@@ -128,7 +128,6 @@ extension InputCapture: FollowingInput {}
     private func seconds(_ quarter: Double) -> Double { prepared!.timing.performanceTime(scoreSeconds: prepared!.midi.seconds(atQuarter: quarter)) }
     private func quarter(_ seconds: Double) -> Double {
         let timing = prepared!.timing
-        if seconds < timing.prepSeconds { return timing.startQuarter + (seconds-timing.prepSeconds)/timing.leadSeconds }
         return prepared!.midi.quarter(atSeconds: timing.scoreTime(performanceSeconds: seconds))
     }
 

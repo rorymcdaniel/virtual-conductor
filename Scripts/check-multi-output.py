@@ -22,11 +22,11 @@ with log.open("w") as output:
         ["swift", "test", "--skip-build", "--filter", "testSwitchingToMultiOutput|MultiOutputTimingTests"],
         env=env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
     try:
-        result = process.wait(timeout=20)
+        result = process.wait(timeout=35)
     except subprocess.TimeoutExpired:
         os.killpg(process.pid, signal.SIGKILL)
         process.wait()
         result = 124
-        print("FAIL: audio output did not complete within the 20-second watchdog.")
+        print("FAIL: audio output did not complete within the 35-second watchdog.")
 print(log.read_text())
 sys.exit(result)
