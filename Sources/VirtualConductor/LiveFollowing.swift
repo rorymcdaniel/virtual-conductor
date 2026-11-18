@@ -58,6 +58,8 @@ extension InputCapture: FollowingInput {}
     private var analysisSamples = 0
     private var analyzing = false
     private var generation: UInt64 = 0
+    private(set) var lastFollowedBPM: Double?
+    func clearLastFollowedTempo() { lastFollowedBPM = nil }
     var hasRecentPitchMatch: Bool { lastTick - tracker.lastMatch < FollowingTempo.recentMatchWindow }
     var completed: (() -> Void)?
     var failed: ((String) -> Void)?
@@ -108,7 +110,7 @@ extension InputCapture: FollowingInput {}
         self.prepared = prepared; self.plan = plan; self.audio = audio
         buffers = Dictionary(uniqueKeysWithValues: segments.map { ($0.position, $0) }); boundaries = limits
         self.position = position; active = true; lastTick = clock(); lastObservation = lastTick; droppedSamples = 0
-        diagnostics.begin(sampleRate: capture.sampleRate, tolerance: tolerance, plan: plan, midi: prepared.midi)
+        diagnostics.begin(sampleRate: capture.sampleRate, tolerance: tolerance, plan: plan, midi: prepared.practice.planned)
         diagnostics.notice("Following started", time: clock(), kind: .started)
         tracker.reset(notes: plan.notes, quarter: max(timing.startQuarter, quarter(position)))
         approvedWaits = Set(plan.waits.filter { $0 < timing.startQuarter || seconds($0) < position - 1e-7 })
@@ -163,6 +165,7 @@ extension InputCapture: FollowingInput {}
         }
         guard let buffer = buffers[location] else { throw MusicalError("Following playback boundary is unavailable. Reset and start again.") }
         phase = .audio; audioEnd = buffer.end
+        audio.setRate(prepared.practice.sourceRate(at: location) * tempo.rate)
         try audio.play(buffer, immediate: !initial)
         status = .following; detail = "Following within ±\(Int(tolerance))%"
     }
@@ -192,7 +195,7 @@ extension InputCapture: FollowingInput {}
         // A configured wait at the return still requires its entrance or this explicit cue.
         approvedWaits.insert(range.end)
         if let index = tracker.index, abs(plan!.notes[index].startQuarter - range.end) < 1e-7 {
-            tracker.beginAccompaniedPhrase(scoreTime: prepared!.midi.seconds(atQuarter: range.end), tolerance: tolerance / 100)
+            tracker.beginAccompaniedPhrase(scoreTime: prepared!.practice.planned.seconds(atQuarter: range.end), tolerance: tolerance / 100)
         } else {
             tracker.reset(notes: plan!.notes, quarter: range.end)
         }
@@ -230,19 +233,22 @@ extension InputCapture: FollowingInput {}
                     } else { try enter(at: audioEnd, fromAccompaniment: true) }
                     return
                 }
-                guard position >= prepared.timing.prepSeconds else { return }
+                let baseRate = prepared.practice.sourceRate(at: position)
+                guard position >= prepared.timing.prepSeconds else { audio.setRate(baseRate); return }
+                let planned = prepared.practice.planned
                 let q = quarter(position)
                 let expectingSound = plan.notes.contains { $0.startQuarter <= q && q < $0.endQuarter }
                 writtenRest = !expectingSound
                 let age = now - tracker.lastMatch
                 let input = FollowingTempoInput.accompanied(delta: delta, tolerance: tolerance / 100, tracker: tracker,
-                    notes: plan.notes, midi: prepared.midi, scoreTime: prepared.timing.scoreTime(performanceSeconds: position), time: now)
+                    notes: plan.notes, midi: planned, scoreTime: planned.seconds(atQuarter: q), time: now)
                 let before = tempo
                 let rate = tempo.update(input)
-                audio.setRate(rate)
-                let beatSeconds = prepared.midi.seconds(atQuarter: q + 0.001) - prepared.midi.seconds(atQuarter: q)
-                diagnostics.recordControl(FollowingControlDecision(time: now, scoreTime: prepared.timing.scoreTime(performanceSeconds: position),
-                    plannedBPM: 0.06 / beatSeconds, before: before, input: input, rate: rate))
+                audio.setRate(baseRate * rate)
+                let bpm = prepared.practice.bpm(atQuarter: q)
+                if expectingSound && !input.isHolding { lastFollowedBPM = bpm * rate }
+                diagnostics.recordControl(FollowingControlDecision(time: now, scoreTime: planned.seconds(atQuarter: q),
+                    plannedBPM: bpm, before: before, input: input, rate: rate))
                 if expectingSound && age > 1.5 && now - entered > 1.5 {
                     status = .lost; detail = "Keeping moving · listening for your position"
                 } else if writtenRest {
@@ -257,6 +263,7 @@ extension InputCapture: FollowingInput {}
                 if now - lastObservation > 0.5 || (lastPitch != nil && now - entered > 0.7) { status = .lost }
             case .cadenza: break
             case .free(let range):
+                let planned = prepared.practice.planned
                 if now - lastObservation > 0.5 { status = .lost; return }
                 guard let index = tracker.index else {
                     if lastPitch != nil && now - entered > 0.4 { status = .lost }
@@ -270,25 +277,26 @@ extension InputCapture: FollowingInput {}
                     // Allow the written rest and one beat of breathing room before
                     // treating silence in a recognized phrase as a deliberate pause.
                     let next = min(followingNote?.startQuarter ?? range.end, range.end)
-                    let rest = max(0, seconds(next) - seconds(note.endQuarter))
-                    let beat = seconds(next + 1) - seconds(next)
+                    let rest = max(0, planned.seconds(atQuarter: next) - planned.seconds(atQuarter: note.endQuarter))
+                    let beat = planned.seconds(atQuarter: next + 1) - planned.seconds(atQuarter: next)
                     let paused = tracker.releasedAt.map { now - $0 > rest + beat } ?? false
                     status = lastPitch == nil && paused ? .waiting : .following
                 }
                 if status == .lost { return }
                 let first = max(prepared.timing.prepSeconds, seconds(range.start))
-                let attack = seconds(note.startQuarter)
+                let playedTime = planned.seconds(atQuarter: note.startQuarter) + max(0, now - tracker.lastAttack) * tracker.rate
+                let playedPosition = seconds(planned.quarter(atSeconds: playedTime))
                 if note.endQuarter > range.end + 1e-7 {
-                    position = max(first, min(seconds(range.end), attack + max(0, now - tracker.lastAttack) * tracker.rate))
+                    position = max(first, min(seconds(range.end), playedPosition))
                     status = .waiting; detail = "Held note crosses the orchestral return · use Right Arrow"
                     return
                 }
-                position = max(first, min(seconds(min(note.endQuarter, range.end)), attack + max(0, now - tracker.lastAttack) * tracker.rate))
+                position = max(first, min(seconds(min(note.endQuarter, range.end)), playedPosition))
                 if let release = tracker.releasedAt {
                     let next = min(range.end, followingNote?.startQuarter ?? range.end)
-                    position = max(first, min(seconds(next), seconds(note.endQuarter) + max(0, now - release)))
+                    position = max(first, min(seconds(next), seconds(planned.quarter(atSeconds: planned.seconds(atQuarter: note.endQuarter) + max(0, now - release)))))
                     let needsReturnAttack = followingNote.map { abs($0.startQuarter - range.end) < 1e-7 } ?? false
-                    if !needsReturnAttack, next >= range.end, now - release >= max(0, prepared.midi.seconds(atQuarter: range.end) - prepared.midi.seconds(atQuarter: note.endQuarter)) {
+                    if !needsReturnAttack, next >= range.end, now - release >= max(0, planned.seconds(atQuarter: range.end) - planned.seconds(atQuarter: note.endQuarter)) {
                         try returnFromFree(range)
                     }
                 }
@@ -382,7 +390,7 @@ extension InputCapture: FollowingInput {}
         let before = tracker
         let expected = quarter(position)
         let matched = tracker.observe(pitch: pitch, time: time, notes: plan.notes, expectedQuarter: quarter(position),
-                                      free: free, midi: prepared.midi, rearticulated: rearticulated, throughQuarter: lastQuarter)
+                                      free: free, midi: prepared.practice.planned, rearticulated: rearticulated, throughQuarter: lastQuarter)
         diagnostics.record(FollowingDecision(tracker: before, pitch: pitch, time: time, expectedQuarter: expected,
                                              free: free, throughQuarter: lastQuarter, rearticulated: rearticulated,
                                              matched: matched, rate: tracker.rate, phase: String(describing: phase), level: level))

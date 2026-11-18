@@ -69,6 +69,7 @@ struct MainView: View {
             }
         }
         .sheet(isPresented: $model.importOpen) { ImportExportsView(model: model) }
+        .sheet(isPresented: $model.tempoOpen) { PracticeTempoView(model: model) }
         .sheet(isPresented: $model.editorOpen) { CadenzaEditorView(model: model) }
         .sheet(isPresented: $model.followingOpen) { FollowingView(model: model) }
         .sheet(isPresented: $model.utilityOpen, onDismiss: model.closeRecording) {
@@ -123,6 +124,7 @@ struct MainView: View {
                     .onSubmit(applyStartMeasure).disabled(!editable)
                 Button("Go", action: applyStartMeasure).disabled(!editable)
                     .help("Prepare a fresh start at this measure")
+                Button("Practice tempo…") { model.tempoOpen = true }.disabled(!editable)
                 Divider().frame(height: 22)
                 Stepper(value: $model.preparation, in: 0...99) {
                     Text("Preparation: \(model.preparation) \(model.preparation == 1 ? "measure" : "measures")").monospacedDigit()
@@ -190,7 +192,7 @@ struct MainView: View {
                         .lineLimit(1).truncationMode(.middle).help("\(midi.path)\n\(wav.path)")
                     Spacer()
                     TimelineView(.periodic(from: .now, by: 0.2)) { _ in
-                        if let timing = model.prepared?.timing { Text(String(format:"♩ = %.1f",timing.position(model.elapsed()).bpm)).monospacedDigit() }
+                        if let practice = model.prepared?.practice { Text(String(format:"♩ = %.1f",practice.bpm(atQuarter: practice.quarter(at: model.elapsed())))).monospacedDigit() }
                     }
                 }.font(.caption2).foregroundStyle(.secondary)
             }

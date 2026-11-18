@@ -32,6 +32,7 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
     @Published var guide = false
     @Published var utilityOpen = false
     @Published var editorOpen = false
+    @Published var tempoOpen = false
     @Published var followingOpen = false
     @Published var importOpen = false
     @Published var filePanelOpen = false
@@ -66,7 +67,7 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
     private var observers: [NSObjectProtocol] = []
     private let settings: CadenzaSettings
     var locked: Bool { [.running,.starting,.loading].contains(state) }
-    var shortcutsBlocked: Bool { utilityOpen || editorOpen || followingOpen || importOpen || filePanelOpen }
+    var shortcutsBlocked: Bool { utilityOpen || tempoOpen || editorOpen || followingOpen || importOpen || filePanelOpen }
     init(defaults: UserDefaults = .standard, takeLibrary: TakeLibrary = TakeLibrary(), cadenzaSettings: CadenzaSettings = CadenzaSettings()) {
         self.defaults = defaults; self.takeLibrary = takeLibrary
         settings = cadenzaSettings
@@ -161,8 +162,17 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
                 var saved: [CadenzaPassage] = []; var warning = ""
                 do { saved = preservingTake ? passages : try settings.load(fingerprint: result.fingerprint); _ = try compileCadenzas(saved,midi:result.midi,audioDuration:Double(result.source.frameLength)/result.source.format.sampleRate) }
                 catch { warning = " Saved settings could not load: \(error.localizedDescription)"; saved = [] }
-                let prep = preparation, values = saved
-                let new = try await Task.detached { try PreparedPerformance(midi:result.midi,source:result.source,preparation:prep,passages:values) }.value
+                let boundaries = result.midi.practiceTempoBoundaries(score: result.score.score)
+                var tempoMarks: [PracticeTempoMark] = []
+                if let data = defaults.data(forKey: "practice-tempos-" + result.fingerprint) {
+                    do {
+                        let marks = try JSONDecoder().decode([PracticeTempoMark].self, from: data)
+                        _ = try result.midi.applyingTempoMarks(marks, boundaries: boundaries)
+                        tempoMarks = marks
+                    } catch { warning += " Saved practice tempos could not load." }
+                }
+                let prep = preparation, values = saved, marks = tempoMarks
+                let new = try await Task.detached { try PreparedPerformance(midi:result.midi,source:result.source,preparation:prep,passages:values,tempoMarks:marks,tempoBoundaries:boundaries) }.value
                 guard token == run else { return }
                 scorePreparation.finishLoading(result.score, generation: scoreToken)
                 let location = RehearsalLocation(midi: midi.standardizedFileURL, wav: wav.standardizedFileURL,
@@ -175,12 +185,12 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
                     do { try settings.save(saved, fingerprint: result.fingerprint) }
                     catch { warning = " Kept cadenza settings could not be saved: \(error.localizedDescription)" }
                 }
-                prepared = new; fingerprint = result.fingerprint; passages = saved; midiURL = midi; wavURL = wav
+                following.clearLastFollowedTempo(); prepared = new; fingerprint = result.fingerprint; passages = saved; midiURL = midi; wavURL = wav
                 if preservingTake { recording.refreshLinkedScore(result.midi, fingerprint: result.fingerprint); if utilityOpen { recording.open() } }
                 else { recording.setScore(result.midi, fingerprint:result.fingerprint) }
                 position = 0; segmentStart = 0; passageIndex = 0; state = .ready
                 if !outputMissing { chooseOutput() }
-                message = "\(result.midi.measures) measures · opening ♩ = \(String(format:"%.1f",result.midi.openingBPM)). Ready.\(warning)"
+                message = "\(result.midi.measures) measures · opening ♩ = \(String(format:"%.1f",new.practice.planned.openingBPM)). Ready.\(warning)"
                 if new.duration + 0.1 < new.midi.duration { message += " Audio ends before MIDI; check the matching exports." }
                 importOpen = false
             } catch { guard token == run else { return }; scorePreparation.failLoading(generation: scoreToken); state = .error; message = "Could not load exports: \(error.localizedDescription)" }
@@ -203,6 +213,24 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         rebuild(startMeasure: measure)
         return true
     }
+    func saveTempoMarks(_ marks: [PracticeTempoMark]) throws {
+        guard !locked, let prepared, !fingerprint.isEmpty else { throw MusicalError("Pause playback before editing practice tempo.") }
+        let updated = try PracticeTempo(timing: prepared.timing, marks: marks, boundaries: prepared.practice.boundaries)
+        let data = try JSONEncoder().encode(updated.marks)
+        defaults.set(data, forKey: "practice-tempos-" + fingerprint)
+        objectWillChange.send()
+        prepared.practice = updated
+        message = "Practice tempos saved for this score."
+    }
+
+    var tempoEditorQuarter: Double {
+        guard let prepared else { return 0 }
+        guard state == .paused || state == .waiting || state == .interrupted, position >= prepared.timing.prepSeconds else {
+            return prepared.timing.startQuarter
+        }
+        return max(0, min(ceil(prepared.midi.endQuarter) - 1, floor(prepared.practice.quarter(at: position) + 1e-8)))
+    }
+
     func reset() {
         run &+= 1; following.stop(); audio.stop(); audio.setRate(1); position = 0; segmentStart = 0; passageIndex = 0
         state = prepared == nil ? .empty : .ready
@@ -212,9 +240,10 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         guard let old = prepared else { return }
         let selected = values ?? passages, prep = preparation, start = startMeasure ?? old.timing.startMeasure
         run &+= 1; let token = run; following.stop(); audio.stop(); state = .loading
+        let marks = old.practice.marks, boundaries = old.practice.boundaries
         Task {
             do {
-                let new = try await Task.detached { try PreparedPerformance(midi:old.midi,source:old.source,preparation:prep,passages:selected,startMeasure:start) }.value
+                let new = try await Task.detached { try PreparedPerformance(midi:old.midi,source:old.source,preparation:prep,passages:selected,startMeasure:start,tempoMarks:marks,tempoBoundaries:boundaries) }.value
                 guard token == run else { return }
                 prepared = new; passages = selected; reset()
             } catch { guard token == run else { return }; state = .error; message = error.localizedDescription }
@@ -222,13 +251,16 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
     }
     func elapsed(host: Double = PerformanceAudio.hostSeconds) -> Double {
         if following.active { return following.position }
-        return state == .running ? min(segmentEnd,max(segmentStart,host-audio.audibleOrigin)) : position
+        return state == .running ? min(segmentEnd,max(segmentStart,audio.position(host: host))) : position
     }
     func snapshot(displayHost: Double) -> ConductorSnapshot { ConductorSnapshot(time:elapsed(host:displayHost),segmentStart:segmentStart,timing:prepared?.timing,state:state) }
     func advanceBoundary() {
         if following.active { following.tick(); return }
         guard state == .running, let prepared else { return }
-        if PerformanceAudio.hostSeconds - audio.audibleOrigin >= segmentEnd {
+        let at = audio.position()
+        let rate = prepared.practice.sourceRate(at: at)
+        if audio.playbackRate != rate { audio.setRate(rate) }
+        if at >= segmentEnd {
             position = segmentEnd
             if passageIndex < prepared.passages.count { state = .waiting; message = "Cadenza — press ArrowRight at the orchestral entrance." }
             else { audio.stop(); state = .finished; message = "Finished." }
@@ -265,10 +297,10 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         }
     }
     private func begin(_ segment: AudioSegment, immediate: Bool) throws {
-        audio.setRate(1)
+        audio.setRate(prepared?.practice.sourceRate(at: segment.position) ?? 1)
         try audio.play(segment,immediate:immediate)
         segmentStart = segment.position; position = segment.position; segmentEnd = segment.end; state = .running
-        message = "Performing · original-speed WAV and MIDI tempo map."
+        message = "Performing."
     }
     func cue() {
         guard !shortcutsBlocked, !outputMissing else { return }

@@ -11,15 +11,17 @@ struct AudioSegment {
 final class PreparedPerformance {
     let midi: MIDIFile
     let timing: PerformanceTiming
+    var practice: PracticeTempo
     let source: AVAudioPCMBuffer
     let passages: [CompiledCadenza]
     let segments: [AudioSegment]
     var duration: Double { Double(source.frameLength) / source.format.sampleRate }
     var end: Double { timing.performanceTime(scoreSeconds: max(duration, midi.duration)) }
-    init(midi: MIDIFile, source: AVAudioPCMBuffer, preparation: Int, passages: [CadenzaPassage], startMeasure: Int = 1) throws {
+    init(midi: MIDIFile, source: AVAudioPCMBuffer, preparation: Int, passages: [CadenzaPassage], startMeasure: Int = 1, tempoMarks: [PracticeTempoMark] = [], tempoBoundaries: Set<Double>? = nil) throws {
         self.midi = midi; self.source = source
         let timing = try PerformanceTiming(midi: midi, preparatoryMeasures: preparation, startMeasure: startMeasure)
         self.timing = timing
+        practice = try PracticeTempo(timing: timing, marks: tempoMarks, boundaries: tempoBoundaries ?? midi.practiceTempoBoundaries(score: nil))
         let compiled = try compileCadenzas(passages, midi: midi, audioDuration: Double(source.frameLength) / source.format.sampleRate)
             .filter { $0.returnQuarter > timing.startQuarter }
         self.passages = compiled
@@ -205,7 +207,9 @@ final class PreparedPerformance {
     func setRate(_ rate: Double) {
         let now = Self.hostSeconds
         clockPosition = position(host: now); clockHost = max(now, clockHost)
-        playbackRate = min(4, max(0.25, rate)); timePitch.rate = Float(playbackRate)
+        // The practice pace and the following adjustment multiply. Use the
+        // time-pitch unit’s supported range for their combined source rate.
+        playbackRate = min(32, max(1.0 / 32, rate)); timePitch.rate = Float(playbackRate)
     }
     /// Appending an already prepared adjacent buffer preserves continuous rendering.
     func append(_ segment: AudioSegment) {
