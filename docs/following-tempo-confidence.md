@@ -12,6 +12,9 @@ the match is uncertain.
   the tempo estimate or through correction of its position relative to the soloist.
 - A consistent phrase must still allow genuine tempo changes within the chosen
   tolerance. The score's written tempo changes continue to apply.
+- Small expressive changes remain responsive. A large change needs more evidence
+  than three sustained-note attacks; while it is unconfirmed, carry the established
+  pulse through the notes and any following solo rest.
 - Missed or wrong notes must not leave the tracker permanently ahead of the player.
 - While confidence is being recovered, hold the current playback rate. Start and
   manually cued returns continue to use the planned tempo.
@@ -41,6 +44,15 @@ attacks spanning 0.6 seconds, with both the phrase fit and individual intervals
 consistent. Long notes can establish a phrase; normal onset jitter is allowed.
 Free following keeps its existing recognition behavior.
 
+Changes greater than 12% relative to the tracker's established pace now need at
+least four coherent attacks. For sparse phrases, the short fitting window retains
+only three attacks, so the next attack must produce a coherent estimate within 5%
+of the pending estimate. Sustaining a pitch cannot supply this confirmation.
+Inconsistent timing, rejected pitches, skipped/backwards matches, and recognition
+resets discard the pending estimate. Smaller adjustments retain the three-attack
+rule. This deliberately adds an attack of latency to large changes on long notes;
+it does not disable following them or reduce the user's tempo tolerance.
+
 Synthetic regressions cover the original forward-match acceleration through the
 live playback controller, missed-note recovery, backwards recovery, short and
 uneven recovery phrases, long notes, and genuine faster/slower playing. Legacy
@@ -48,3 +60,31 @@ diagnostic files still decode. The private rehearsal was also replayed using bot
 its recorded transport positions and a simulated transport driven by the updated
 controller. Neither replay accelerated through the problem passage. This is
 software replay evidence; a new horn rehearsal is still the musical check.
+
+## Sustained-note slowdown verification (2026-11-18)
+
+The owner's later diagnostic captured three half-note attacks establishing a
+0.775 rate against the planned 108 BPM, followed by a solo rest. The notes were
+already interpreted with their correct lengths. The short phrase was accepted
+too readily as a new tempo, and playback carried that slowdown into the rest.
+The report also contains capture interruptions; the focused continuous replay
+uses the uninterrupted interval at quarters 211–218 and does not replay across
+those interruptions. There is no opted-in audio in this report, so the reason for
+the detected attack timing is not established.
+
+The original replay failed at 0.745–0.961 times planned tempo. With additional
+confirmation it holds 0.961 throughout the passage while recognizing the notes.
+Synthetic live-controller tests cover three half notes followed by a solo rest,
+both apparent slowdown and acceleration, and small genuine tempo changes.
+Further tests check that a fourth consistent attack permits a large change,
+contradictory timing does not, pending confirmation survives diagnostic encoding,
+and extended long-note phrases still reach their performed tempo. The earlier
+measure-27 observation and audio replays also pass. Private reports remain local.
+
+The complete Swift suite passed: 162 tests passed and four opt-in hardware tests
+were skipped. The warnings-as-errors build passed. The signed release was installed
+in Applications; its bundled replay passed all three private cases, and the app
+opened Ready with the owner's score, solo staff, following setting, and output
+selection restored. The 36 checked local data/export files were unchanged and
+preferences were semantically unchanged (the recent-rehearsal JSON was re-encoded).
+A new microphone/headphone rehearsal has not been performed for this change.

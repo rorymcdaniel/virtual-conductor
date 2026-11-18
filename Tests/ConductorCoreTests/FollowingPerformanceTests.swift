@@ -4,7 +4,8 @@ import ConductorCore
 @testable import VirtualConductor
 
 @MainActor final class FollowingPerformanceTests: XCTestCase {
-    private func perform(onsets: [Double], midi: MIDIFile? = nil) async throws -> FollowingDiagnostic {
+    private func perform(onsets: [Double], midi: MIDIFile? = nil, score: MusicXMLScore? = nil,
+                         releaseAt: Double? = nil, until: Double? = nil) async throws -> FollowingDiagnostic {
         let midi = try midi ?? FollowingFixture.midi()
         let format = AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1)!
         let source = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(ceil(midi.duration*8000)))!
@@ -15,21 +16,49 @@ import ConductorCore
         let diagnostics = FollowingDiagnostics(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
         var now = 0.0
         let following = LiveFollowing(diagnostics: diagnostics, capture: input, clock: { now }, permission: { true }, defaults: UserDefaults(suiteName: UUID().uuidString)!)
-        let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        let plan = try FollowingPlan(score: score ?? FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo, waits: [], cadenzas: [])
         following.tolerance = 20
         try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
-        let pitches = [60,62,64,65]
-        for frame in 1...Int((onsets.last!+0.3)*100) {
+        for frame in 1...Int((until ?? (onsets.last!+0.3))*100) {
             now = Double(frame)*0.01
             audio.sourcePosition += 0.01*(audio.rates.last ?? 1)
             following.tick()
-            let index = onsets.lastIndex { $0 <= now }
-            following.observe(pitch: index.map { pitches[$0%4] }, time: now)
+            let index = now >= (releaseAt ?? .infinity) ? nil : onsets.lastIndex { $0 <= now }
+            following.observe(pitch: index.map { plan.notes[$0].pitch }, time: now)
         }
         following.stop()
         while diagnostics.saving { await Task.yield() }
         defer { try? FileManager.default.removeItem(at: diagnostics.root) }
         return try XCTUnwrap(diagnostics.snapshot()).0
+    }
+
+    func testThreeLongNotesCannotResetThePulseCarriedThroughASoloRest() async throws {
+        let score = try MusicXMLScore(data: Data("""
+        <score-partwise><part-list><score-part id="S"><part-name>Solo</part-name></score-part></part-list>
+        <part id="S"><measure number="1"><attributes><divisions>1</divisions>
+        <time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+        <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration></note>
+        <note><pitch><step>D</step><octave>4</octave></pitch><duration>2</duration></note></measure>
+        <measure number="2"><note><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration></note>
+        <note><rest/><duration>2</duration></note></measure>
+        <measure number="3"><note><rest/><duration>4</duration></note></measure>
+        <measure number="4"><note><rest/><duration>4</duration></note></measure></part></score-partwise>
+        """.utf8))
+        for pace in [0.78, 1.25, 0.94, 1.06] {
+            let report = try await perform(onsets: (0..<3).map { 0.5 + Double($0)/pace },
+                                           score: score, releaseAt: 4.5, until: 7)
+            let commands = try XCTUnwrap(report.controls)
+            XCTAssertEqual(report.decisions.compactMap(\.matched), [0, 1, 2])
+            let rest = commands.filter { $0.time >= 5 }
+            let expected = abs(pace - 1) > 0.12 ? 1 : pace
+            XCTAssertEqual(try XCTUnwrap(rest.first).rate, expected, accuracy: 0.04,
+                           "Small adjustments still follow; three sparse attacks cannot establish a large change")
+            XCTAssertEqual(try XCTUnwrap(rest.last).rate, try XCTUnwrap(rest.first).rate, accuracy: 0.001,
+                           "The orchestra carries the established pulse through the solo rest")
+            let decoded = try FollowingDiagnostic.decode(report.encoded())
+            XCTAssertTrue(decoded.replay().isEmpty)
+            XCTAssertTrue(decoded.replayControls().isEmpty)
+        }
     }
 
     func testOneLateBreathDoesNotResetTheSharedPulse() async throws {

@@ -95,6 +95,9 @@ public struct SoloTracker: Codable, Sendable {
     private var searchStart = 0
     // Optional so diagnostics saved before confidence tracking remain readable.
     private var tempoConfirmed: Bool? = false
+    // A short phrase proposing a large change needs another attack to confirm it.
+    // Optional for compatibility with saved diagnostics from earlier versions.
+    private var pendingTempoRate: Double?
     public var hasReliableTempo: Bool { tempoConfirmed ?? (anchors.count >= 3) }
 
     public init() {}
@@ -104,6 +107,7 @@ public struct SoloTracker: Codable, Sendable {
         return validIndex && validPitches && searchStart >= 0 && searchStart <= noteCount &&
             candidateCount >= 0 && candidateCount < Int.max / 2 && silentFrames >= 0 && silentFrames < Int.max / 2 &&
             rate.isFinite && (0.1...4).contains(rate) && candidateSince.isFinite &&
+            (pendingTempoRate.map { $0.isFinite && (0.1...4).contains($0) } ?? true) &&
             (lastMatch.isFinite || lastMatch == -.infinity) && (lastAttack.isFinite || lastAttack == -.infinity) &&
             (releasedAt?.isFinite ?? true) && (previousFrameTime?.isFinite ?? true) &&
             anchors.count <= 10000 && anchors.allSatisfy { $0.hostTime.isFinite && $0.scoreTime.isFinite }
@@ -117,6 +121,7 @@ public struct SoloTracker: Codable, Sendable {
     }
 
     public mutating func beginAccompaniedPhrase(scoreTime: Double, tolerance: Double) {
+        pendingTempoRate = nil
         // The return starts at planned tempo. Keep the recognized attack so a
         // sustained return note is not mistaken for a second entrance.
         // Let a steady, in-tolerance lead-in guide the gradual adjustment after
@@ -174,7 +179,7 @@ public struct SoloTracker: Codable, Sendable {
                 $0 >= lower && notes[$0].startQuarter >= earliest && notes[$0].startQuarter <= latest
             }
             // A real long-note phrase can drift beyond that window before its
-            // third attack confirms a pace. Preserve immediate sequential
+            // attacks confirm a pace. Preserve immediate sequential
             // evidence, while distant pitch-only jumps still need reacquisition.
             if let index, next == index + 1, next < notes.count, onset > lastAttack {
                 let interval = midi.seconds(atQuarter: notes[next].startQuarter) - midi.seconds(atQuarter: notes[index].startQuarter)
@@ -188,13 +193,13 @@ public struct SoloTracker: Codable, Sendable {
         }) else {
             // An unrecognized pitch supplies no timing evidence. Keep the
             // previous phrase so the next correct attack can corroborate it.
-            if !free { tempoConfirmed = false }
+            if !free { tempoConfirmed = false; pendingTempoRate = nil }
             return nil
         }
         // Position recovery is useful without being evidence of faster playing.
         // Start a new phrase after a skipped or backwards match; retain its last
         // trusted pace until subsequent attacks corroborate the new position.
-        if !free, let index, match != index + 1 { anchors = []; tempoConfirmed = false }
+        if !free, let index, match != index + 1 { anchors = []; tempoConfirmed = false; pendingTempoRate = nil }
         let scoreTime = midi.seconds(atQuarter: notes[match].startQuarter)
         // Estimate pace over a short phrase. A frame of onset jitter on a single
         // triplet should not drive the accompaniment all the way to its tempo limit.
@@ -224,8 +229,18 @@ public struct SoloTracker: Codable, Sendable {
             }
             if free { rate = min(4, max(0.1, fitted)) }
             else {
-                tempoConfirmed = anchors.count >= 3 && onset - anchors[0].hostTime >= 0.6 &&
+                let consistent = anchors.count >= 3 && onset - anchors[0].hostTime >= 0.6 &&
                     fitted.isFinite && (0.1...4).contains(fitted) && coherent
+                // Keep small expressive changes responsive. Two intervals alone
+                // cannot replace the established pulse with a markedly different
+                // pace that would then persist through a long note or solo rest.
+                // A fourth coherent attack, or a matching estimate on the next
+                // attack of a sparse phrase, supplies the extra evidence.
+                let largeChange = abs(fitted / rate - 1) > 0.12
+                let corroborated = anchors.count >= 4 ||
+                    pendingTempoRate.map { abs(fitted / $0 - 1) <= 0.05 } == true
+                tempoConfirmed = consistent && (!largeChange || corroborated)
+                pendingTempoRate = consistent && !hasReliableTempo ? fitted : nil
                 if hasReliableTempo { rate = fitted }
             }
         }

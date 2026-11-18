@@ -88,6 +88,45 @@ final class TempoConfidenceTests: XCTestCase {
         }
     }
 
+    func testLargeLongNoteTempoChangeNeedsAnotherConsistentAttack() throws {
+        let midi = try FollowingFixture.midi()
+        let notes = (0..<5).map { MIDINote(pitch: 60+$0, startQuarter: Double($0)*2, endQuarter: Double($0+1)*2) }
+        for pace in [0.78, 1.25] {
+            var tracker = SoloTracker()
+            for i in 0..<4 {
+                for offset in [0.0, 0.02] {
+                    tracker.observe(pitch: notes[i].pitch, time: Double(i)/pace+offset,
+                                    notes: notes, expectedQuarter: notes[i].startQuarter, free: false, midi: midi)
+                }
+                XCTAssertEqual(tracker.index, i)
+                if i == 2 {
+                    XCTAssertFalse(tracker.hasReliableTempo)
+                    XCTAssertEqual(tracker.rate, 1)
+                    // A saved excerpt can begin while confirmation is pending.
+                    tracker = try JSONDecoder().decode(SoloTracker.self, from: JSONEncoder().encode(tracker))
+                }
+            }
+            XCTAssertTrue(tracker.hasReliableTempo, "A deliberate sustained change must still be followed")
+            XCTAssertEqual(tracker.rate, pace, accuracy: 0.01)
+        }
+    }
+
+    func testContradictoryLongNoteTimingCannotConfirmAPendingTempoChange() throws {
+        let midi = try FollowingFixture.midi()
+        let notes = (0..<4).map { MIDINote(pitch: 60+$0, startQuarter: Double($0)*2, endQuarter: Double($0+1)*2) }
+        var tracker = SoloTracker()
+        // Two slow intervals propose a new pace; the next interval contradicts it.
+        for (i, time) in [0.0, 1.3, 2.6, 3.4].enumerated() {
+            for offset in [0.0, 0.02] {
+                tracker.observe(pitch: notes[i].pitch, time: time+offset, notes: notes,
+                                expectedQuarter: notes[i].startQuarter, free: false, midi: midi)
+            }
+        }
+        XCTAssertEqual(tracker.index, 3)
+        XCTAssertFalse(tracker.hasReliableTempo)
+        XCTAssertEqual(tracker.rate, 1, "Confirmation needs consistent timing, not merely another note")
+    }
+
     func testRecoveryCanMoveBehindAnUnconfirmedMatch() throws {
         let midi = try FollowingFixture.midi()
         var tracker = SoloTracker()
