@@ -60,3 +60,19 @@ The loopback also appends ten buffers and updates the tempo every 15 ms during
 playback, including unchanged-rate updates. It checks audible completion against
 the transport and counts frames deferred by realtime engine contention. This
 catches gaps/clock drift that a route-only test or pre-start rate change misses.
+
+## Verification on November 17, 2026
+
+The warnings-as-errors suite passed 153 tests with four opt-in hardware checks
+skipped. Nine release audio checks passed with hardware enabled. Final release
+route/timing checks also passed after review: six starts were within 21 ms of
+their predicted origin, continuous rate updates deferred zero frames, and the
+completion error was 13 ms. Standards review's duplicate cleanup was removed;
+specification review cleared after continuous-rate coverage was added.
+
+The signed app was installed and reopened with the owner's score, two preparation
+measures, solo staff, and cadenza. The native output menu selected the formerly
+freezing device, Test output ran, and switching back and forth remained responsive.
+The app was left Ready on Blackhole & Headphones. The owner had already confirmed
+the prototype tone in headphones, with simultaneous BlackHole loopback detection.
+The rehearsal report was saved before restart and the prior app was backed up.
