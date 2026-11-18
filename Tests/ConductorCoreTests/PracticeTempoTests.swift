@@ -36,6 +36,43 @@ final class PracticeTempoTests: XCTestCase {
         XCTAssertThrowsError(try midi.applyingTempoMarks([.init(quarter: 16, bpm: 70)], boundaries: boundaries))
     }
 
+    func testDeletingOneEntryOrAnEntireRampCarriesThePrecedingTempo() throws {
+        let midi = try MIDIFile(data: rampMIDI())
+        let timing = try PerformanceTiming(midi: midi, preparatoryMeasures: 0)
+        func map(_ edits: PracticeTempo.Edits) throws -> PracticeTempo {
+            try PracticeTempo(timing: timing, marks: edits.marks, boundaries: [0, 1, 4.5], deleted: edits.deleted)
+        }
+        let original = try map(.init(marks: [.init(quarter: 0.5, bpm: 84)]))
+        let ramp = try XCTUnwrap(original.entries.first { $0.quarter == 1 })
+        let single = try map(original.deleting(ramp, includingTempoSteps: false))
+        XCTAssertEqual(single.bpm(atQuarter: 1), 84)
+        XCTAssertEqual(single.nextMark(after: 0.5), 2)
+        XCTAssertEqual(single.bpm(atQuarter: 2), midi.tempo(atQuarter: 2))
+        XCTAssertFalse(single.entries.contains { $0.quarter == 1 })
+        let step = try XCTUnwrap(single.entries.first { $0.quarter == 2 })
+        let twice = try map(single.deleting(step, includingTempoSteps: false))
+        XCTAssertEqual(twice.bpm(atQuarter: 2), 84)
+        XCTAssertEqual(twice.bpm(atQuarter: 3), midi.tempo(atQuarter: 3))
+
+        let group = try map(original.deleting(ramp, includingTempoSteps: true))
+        XCTAssertEqual(group.entries.map(\.quarter), [0, 0.5, 4.5])
+        XCTAssertEqual(group.bpm(atQuarter: 4), 84)
+        XCTAssertEqual(group.bpm(atQuarter: 4.5), 100)
+        let last = try XCTUnwrap(group.entries.last)
+        let toEnd = try map(group.deleting(last, includingTempoSteps: false))
+        XCTAssertEqual(toEnd.bpm(atQuarter: 15), 84)
+
+        // A local mark at the same beat as a score event must delete cleanly.
+        let overlay = try map(.init(marks: [.init(quarter: 1, bpm: 150)]))
+        let local = try XCTUnwrap(overlay.entries.first { $0.source == .practice })
+        let removed = try map(overlay.deleting(local, includingTempoSteps: false))
+        XCTAssertTrue(removed.marks.isEmpty)
+        XCTAssertEqual(removed.bpm(atQuarter: 1), 120)
+        XCTAssertEqual(removed.sourceRate(at: timing.performanceTime(scoreSeconds: midi.seconds(atQuarter: 1.1))),
+                       120 / midi.tempo(atQuarter: 1), accuracy: 1e-8)
+        XCTAssertEqual(removed.bpm(atQuarter: 2), midi.tempo(atQuarter: 2))
+    }
+
     private func rampMIDI(finalTempo: Int = 600_000) -> Data {
         var track: [UInt8] = []
         for (i, us) in [500_000, 525_000, 550_000, 575_000, finalTempo].enumerated() {
@@ -83,6 +120,24 @@ final class PracticeTempoTests: XCTestCase {
         model.reload()
         while model.state == .loading { await Task.yield() }
         XCTAssertEqual(model.prepared?.practice.bpm(atQuarter: 8), 100)
+        let practice = try XCTUnwrap(model.prepared?.practice)
+        let last = try XCTUnwrap(practice.entries.last)
+        try model.saveTempoEdits(practice.deleting(last, includingTempoSteps: false))
+        XCTAssertTrue(model.chooseStartMeasure("3"))
+        while model.state == .loading { await Task.yield() }
+        XCTAssertEqual(model.prepared?.practice.deleted, [4])
+        model.reload()
+        while model.state == .loading { await Task.yield() }
+        XCTAssertEqual(model.prepared?.practice.deleted, [4])
+        XCTAssertEqual(model.prepared?.practice.bpm(atQuarter: 8), practice.bpm(atQuarter: 3))
+        XCTAssertEqual(try Data(contentsOf: midi), data)
+        // Existing preferences were a flat array before score entries could be deleted.
+        defaults.set(try JSONEncoder().encode(marks), forKey: "practice-tempos-" + model.fingerprint)
+        model.reload()
+        while model.state == .loading { await Task.yield() }
+        XCTAssertEqual(model.prepared?.practice.marks, marks)
+        XCTAssertEqual(model.prepared?.practice.deleted, [])
+
     }
 
     @MainActor func testFixedPlaybackUsesPracticeRateThroughRestartAndNextMarkOnThisMac() async throws {

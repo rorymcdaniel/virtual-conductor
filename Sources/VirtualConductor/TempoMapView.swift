@@ -6,6 +6,8 @@ struct TempoMapView: View {
     let end: Double
     let selected: Double?
     let select: (PracticeTempo.Entry) -> Void
+    let delete: (PracticeTempo.Entry, Bool) -> Void
+    let hasFollowingSteps: (PracticeTempo.Entry) -> Bool
 
     private var active: PracticeTempo.Entry? {
         selected.flatMap { q in entries.last { $0.quarter <= q } }
@@ -71,18 +73,31 @@ struct TempoMapView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
                         ForEach(entries) { entry in
-                            Button { select(entry) } label: {
-                                HStack {
-                                    Text(PracticeTempoView.location(entry.quarter)).monospacedDigit()
-                                    Spacer()
-                                    Text(entry.source.rawValue).foregroundStyle(.secondary)
-                                    Text("\(entry.bpm.formatted(.number.precision(.fractionLength(0...3)))) BPM")
-                                        .monospacedDigit().frame(minWidth: 100, alignment: .trailing)
+                            HStack(spacing: 6) {
+                                Button { select(entry) } label: {
+                                    HStack {
+                                        Text(PracticeTempoView.location(entry.quarter)).monospacedDigit()
+                                        Spacer()
+                                        Text(entry.source.rawValue).foregroundStyle(.secondary)
+                                        Text("\(entry.bpm.formatted(.number.precision(.fractionLength(0...3)))) BPM")
+                                            .monospacedDigit().frame(minWidth: 100, alignment: .trailing)
+                                    }
+                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                                    .background(active?.id == entry.id ? Color.mint.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 4))
+                                    .contentShape(Rectangle())
+                                }.buttonStyle(.plain)
+                                if hasFollowingSteps(entry) && entry.quarter > 0 {
+                                    Menu {
+                                        Button("Delete this entry") { delete(entry, false) }
+                                        Button("Delete this entry and following tempo steps") { delete(entry, true) }
+                                    } label: {
+                                        Text("Delete")
+                                    } primaryAction: { delete(entry, false) }
+                                    .fixedSize()
+                                } else {
+                                    Button("Delete") { delete(entry, false) }.disabled(entry.quarter == 0)
                                 }
-                                .padding(.horizontal, 8).padding(.vertical, 4)
-                                .background(active?.id == entry.id ? Color.mint.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 4))
-                                .contentShape(Rectangle())
-                            }.buttonStyle(.plain).id(entry.id)
+                            }.id(entry.id)
                         }
                     }
                 }

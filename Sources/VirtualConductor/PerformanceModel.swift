@@ -163,16 +163,18 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
                 do { saved = preservingTake ? passages : try settings.load(fingerprint: result.fingerprint); _ = try compileCadenzas(saved,midi:result.midi,audioDuration:Double(result.source.frameLength)/result.source.format.sampleRate) }
                 catch { warning = " Saved settings could not load: \(error.localizedDescription)"; saved = [] }
                 let boundaries = result.midi.practiceTempoBoundaries(score: result.score.score)
-                var tempoMarks: [PracticeTempoMark] = []
+                var edits = PracticeTempo.Edits()
                 if let data = defaults.data(forKey: "practice-tempos-" + result.fingerprint) {
                     do {
-                        let marks = try JSONDecoder().decode([PracticeTempoMark].self, from: data)
-                        _ = try result.midi.applyingTempoMarks(marks, boundaries: boundaries)
-                        tempoMarks = marks
+                        let decoder = JSONDecoder()
+                        let saved = try (try? decoder.decode(PracticeTempo.Edits.self, from: data))
+                            ?? PracticeTempo.Edits(marks: decoder.decode([PracticeTempoMark].self, from: data))
+                        _ = try result.midi.applyingTempoMarks(saved.marks, boundaries: boundaries, deleted: saved.deleted)
+                        edits = saved
                     } catch { warning += " Saved practice tempos could not load." }
                 }
-                let prep = preparation, values = saved, marks = tempoMarks
-                let new = try await Task.detached { try PreparedPerformance(midi:result.midi,source:result.source,preparation:prep,passages:values,tempoMarks:marks,tempoBoundaries:boundaries) }.value
+                let prep = preparation, values = saved, tempoEdits = edits
+                let new = try await Task.detached { try PreparedPerformance(midi:result.midi,source:result.source,preparation:prep,passages:values,tempoMarks:tempoEdits.marks,tempoBoundaries:boundaries,deletedTempos:tempoEdits.deleted) }.value
                 guard token == run else { return }
                 scorePreparation.finishLoading(result.score, generation: scoreToken)
                 let location = RehearsalLocation(midi: midi.standardizedFileURL, wav: wav.standardizedFileURL,
@@ -214,9 +216,13 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         return true
     }
     func saveTempoMarks(_ marks: [PracticeTempoMark]) throws {
+        try saveTempoEdits(.init(marks: marks, deleted: prepared?.practice.deleted ?? []))
+    }
+
+    func saveTempoEdits(_ edits: PracticeTempo.Edits) throws {
         guard !locked, let prepared, !fingerprint.isEmpty else { throw MusicalError("Pause playback before editing practice tempo.") }
-        let updated = try PracticeTempo(timing: prepared.timing, marks: marks, boundaries: prepared.practice.boundaries)
-        let data = try JSONEncoder().encode(updated.marks)
+        let updated = try PracticeTempo(timing: prepared.timing, marks: edits.marks, boundaries: prepared.practice.boundaries, deleted: edits.deleted)
+        let data = try JSONEncoder().encode(updated.edits)
         defaults.set(data, forKey: "practice-tempos-" + fingerprint)
         objectWillChange.send()
         prepared.practice = updated
@@ -240,10 +246,10 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         guard let old = prepared else { return }
         let selected = values ?? passages, prep = preparation, start = startMeasure ?? old.timing.startMeasure
         run &+= 1; let token = run; following.stop(); audio.stop(); state = .loading
-        let marks = old.practice.marks, boundaries = old.practice.boundaries
+        let tempoEdits = old.practice.edits, boundaries = old.practice.boundaries
         Task {
             do {
-                let new = try await Task.detached { try PreparedPerformance(midi:old.midi,source:old.source,preparation:prep,passages:selected,startMeasure:start,tempoMarks:marks,tempoBoundaries:boundaries) }.value
+                let new = try await Task.detached { try PreparedPerformance(midi:old.midi,source:old.source,preparation:prep,passages:selected,startMeasure:start,tempoMarks:tempoEdits.marks,tempoBoundaries:boundaries,deletedTempos:tempoEdits.deleted) }.value
                 guard token == run else { return }
                 prepared = new; passages = selected; reset()
             } catch { guard token == run else { return }; state = .error; message = error.localizedDescription }

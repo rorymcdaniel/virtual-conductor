@@ -17,11 +17,11 @@ final class PreparedPerformance {
     let segments: [AudioSegment]
     var duration: Double { Double(source.frameLength) / source.format.sampleRate }
     var end: Double { timing.performanceTime(scoreSeconds: max(duration, midi.duration)) }
-    init(midi: MIDIFile, source: AVAudioPCMBuffer, preparation: Int, passages: [CadenzaPassage], startMeasure: Int = 1, tempoMarks: [PracticeTempoMark] = [], tempoBoundaries: Set<Double>? = nil) throws {
+    init(midi: MIDIFile, source: AVAudioPCMBuffer, preparation: Int, passages: [CadenzaPassage], startMeasure: Int = 1, tempoMarks: [PracticeTempoMark] = [], tempoBoundaries: Set<Double>? = nil, deletedTempos: Set<Double> = []) throws {
         self.midi = midi; self.source = source
         let timing = try PerformanceTiming(midi: midi, preparatoryMeasures: preparation, startMeasure: startMeasure)
         self.timing = timing
-        practice = try PracticeTempo(timing: timing, marks: tempoMarks, boundaries: tempoBoundaries ?? midi.practiceTempoBoundaries(score: nil))
+        practice = try PracticeTempo(timing: timing, marks: tempoMarks, boundaries: tempoBoundaries ?? midi.practiceTempoBoundaries(score: nil), deleted: deletedTempos)
         let compiled = try compileCadenzas(passages, midi: midi, audioDuration: Double(source.frameLength) / source.format.sampleRate)
             .filter { $0.returnQuarter > timing.startQuarter }
         self.passages = compiled

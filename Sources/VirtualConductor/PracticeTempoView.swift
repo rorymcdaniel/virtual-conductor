@@ -7,6 +7,7 @@ struct PracticeTempoView: View {
     @State private var beat: String
     @State private var bpm: String
     @State private var error = ""
+    @State private var undoDeletes: [PracticeTempo.Edits] = []
 
     init(model: PerformanceModel) {
         self.model = model
@@ -34,7 +35,20 @@ struct PracticeTempoView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Practice tempo").font(.title2.bold())
             if let practice = model.prepared?.practice {
-                TempoMapView(entries: practice.entries, end: practice.planned.endQuarter, selected: quarter, select: select)
+                TempoMapView(entries: practice.entries, end: practice.planned.endQuarter, selected: quarter, select: select,
+                             delete: { entry, includeSteps in
+                                 changeMap(practice.deleting(entry, includingTempoSteps: includeSteps))
+                             }, hasFollowingSteps: practice.hasFollowingSteps)
+                if !undoDeletes.isEmpty || !practice.deleted.isEmpty {
+                    HStack {
+                        if let previous = undoDeletes.last {
+                            Button("Undo") { changeMap(previous, undoing: true) }
+                        }
+                        if !practice.deleted.isEmpty {
+                            Button("Restore deleted score entries") { changeMap(.init(marks: practice.marks)) }
+                        }
+                    }
+                }
                 Divider()
             }
             HStack {
@@ -88,6 +102,16 @@ struct PracticeTempoView: View {
         measure = String(Int(entry.quarter / 4) + 1)
         beat = Self.number(entry.quarter.truncatingRemainder(dividingBy: 4) + 1, precision: 7)
         bpm = Self.number(entry.bpm)
+    }
+
+    private func changeMap(_ edits: PracticeTempo.Edits, undoing: Bool = false) {
+        guard let before = model.prepared?.practice.edits else { return }
+        do {
+            try model.saveTempoEdits(edits)
+            if undoing { undoDeletes.removeLast() } else { undoDeletes.append(before) }
+            if let q = quarter, let practice = model.prepared?.practice { bpm = Self.number(practice.bpm(atQuarter: q)) }
+            error = ""
+        } catch { self.error = error.localizedDescription }
     }
 
     private func save(_ marks: [PracticeTempoMark]) {

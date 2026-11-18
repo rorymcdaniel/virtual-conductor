@@ -210,30 +210,59 @@ public extension MIDIFile {
         return written.isEmpty ? exported : written.union([0])
     }
 
-    func applyingTempoMarks(_ marks: [PracticeTempoMark], boundaries: Set<Double>) throws -> MIDIFile {
-        guard !marks.isEmpty else { return self }
+    /// When one score marking is deleted, its next surviving ramp step can
+    /// still take over from a preceding practice marking.
+    func remainingTempoBoundaries(_ boundaries: Set<Double>, deleted: Set<Double>) -> Set<Double> {
+        var remaining = boundaries.subtracting(deleted)
+        guard !boundaries.isDisjoint(with: deleted) else { return remaining }
+        var needsNextStep = false
+        var preceding: Double?
+        for q in boundaries.union(segments.map(\.quarter)).sorted() {
+            let recorded = tempo(atQuarter: q)
+            if boundaries.contains(q) {
+                needsNextStep = deleted.contains(q)
+            } else if needsNextStep && recorded != preceding && !deleted.contains(q) {
+                remaining.insert(q)
+                needsNextStep = false
+            }
+            preceding = recorded
+        }
+        return remaining
+    }
+
+    func applyingTempoMarks(_ marks: [PracticeTempoMark], boundaries: Set<Double>, deleted: Set<Double> = []) throws -> MIDIFile {
+        guard !marks.isEmpty || !deleted.isEmpty else { return self }
         var local: [Double: Double] = [:]
         for mark in marks {
             guard mark.quarter.isFinite, mark.quarter >= 0, mark.quarter < endQuarter,
                   mark.bpm.isFinite, mark.bpm > 0 else { throw MusicalError("Choose a position within the piece and a positive tempo.") }
             local[mark.quarter] = mark.bpm
         }
+        let remaining = remainingTempoBoundaries(boundaries, deleted: deleted)
         let positions = Set(segments.map(\.quarter)).union(boundaries).union(local.keys)
         var timeline: [TempoSegment] = []
-        var activeBPM: Double?
+        var followsLocalMark = false
+        var effective = segments[0].secondsPerQuarter
+        var previousRecorded: Double?
         for quarter in positions.sorted() {
-            if boundaries.contains(quarter) { activeBPM = nil }
-            if let bpm = local[quarter] { activeBPM = bpm }
             let recorded = segment(at: quarter, key: \.quarter).secondsPerQuarter
-            if let activeBPM {
-                guard (0.25...4).contains(activeBPM * recorded / 60) else {
-                    throw MusicalError("This tempo exceeds the accompaniment’s playback range in this passage (¼× to 4× its recorded tempo).")
+            let preceding = effective
+            if let bpm = local[quarter] {
+                effective = 60 / bpm
+                followsLocalMark = true
+            } else if !deleted.contains(quarter) {
+                if remaining.contains(quarter) { followsLocalMark = false }
+                if !followsLocalMark && (remaining.contains(quarter) || recorded != previousRecorded) {
+                    effective = recorded
                 }
-                // Keep the local pulse through intermediate steps of a written ramp.
-                if local[quarter] == nil { continue }
             }
+            previousRecorded = recorded
+            guard (0.25...4).contains(recorded / effective) else {
+                throw MusicalError("This tempo exceeds the accompaniment’s playback range in this passage (¼× to 4× its recorded tempo).")
+            }
+            if !timeline.isEmpty && effective == preceding { continue }
             let seconds = timeline.last.map { $0.seconds + (quarter - $0.quarter) * $0.secondsPerQuarter } ?? 0
-            timeline.append(TempoSegment(quarter: quarter, seconds: seconds, secondsPerQuarter: activeBPM.map { 60 / $0 } ?? recorded))
+            timeline.append(TempoSegment(quarter: quarter, seconds: seconds, secondsPerQuarter: effective))
         }
         return MIDIFile(source: self, timeline: timeline)
     }
