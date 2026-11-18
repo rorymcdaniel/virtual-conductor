@@ -17,6 +17,41 @@ enum NativeError: LocalizedError {
 
 /// HAL reads only; never changes system defaults or device-wide settings.
 final class AudioDevices {
+    static func objectIDs(_ id: AudioObjectID, selector: AudioObjectPropertySelector,
+                          scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> [AudioObjectID] {
+        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(id, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var ids = [AudioObjectID](repeating: 0, count: Int(size)/MemoryLayout<AudioObjectID>.size)
+        let result = ids.withUnsafeMutableBytes { AudioObjectGetPropertyData(id, &address, 0, nil, &size, $0.baseAddress!) }
+        return result == noErr ? ids : []
+    }
+    static func nominalSampleRate(_ id: AudioObjectID) -> Double {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var rate = 0.0, size = UInt32(MemoryLayout<Double>.size)
+        _ = AudioObjectGetPropertyData(id, &address, 0, nil, &size, &rate)
+        return rate
+    }
+    static func needsSeparateOutputUnit(_ id: AudioObjectID) -> Bool {
+        // AVAudioEngine's hardware-format discovery loops on this mixed-width
+        // aggregate (for example 2-channel headphones + BlackHole 16ch).
+        let counts = objectIDs(id, selector: kAudioAggregateDevicePropertyActiveSubDeviceList)
+            .map { channels($0, input: false) }.filter { $0 > 0 }
+        return Set(counts).count > 1
+    }
+    static func outputPresentationLatency(_ id: AudioObjectID, sampleRate: Double) -> Double {
+        func frames(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope) -> UInt32 {
+            var address = AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+            var value: UInt32 = 0, size = UInt32(MemoryLayout<UInt32>.size)
+            _ = AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value)
+            return value
+        }
+        let device = frames(id, kAudioDevicePropertyLatency, kAudioDevicePropertyScopeOutput)
+        let streams = objectIDs(id, selector: kAudioDevicePropertyStreams, scope: kAudioDevicePropertyScopeOutput)
+        let stream = streams.map { frames($0, kAudioStreamPropertyLatency, kAudioObjectPropertyScopeGlobal) }.max() ?? 0
+        return (Double(device) + Double(stream)) / sampleRate
+    }
     static func channels(_ id: AudioObjectID, input: Bool) -> Int {
         var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreamConfiguration, mScope: input ? kAudioDevicePropertyScopeInput : kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
         var size: UInt32 = 0

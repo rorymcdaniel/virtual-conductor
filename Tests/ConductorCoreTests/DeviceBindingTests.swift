@@ -4,6 +4,26 @@ import ConductorCore
 @testable import VirtualConductor
 
 final class DeviceBindingTests: XCTestCase {
+    @MainActor func testSwitchingToMultiOutputCompletesOnThisMac() throws {
+        guard let name = ProcessInfo.processInfo.environment["VC_MULTI_OUTPUT_CHECK"] else {
+            throw XCTSkip("Set VC_MULTI_OUTPUT_CHECK to the multi-output device name; run under a process timeout.")
+        }
+        let devices = try AudioDevices.list()
+        let target = try XCTUnwrap(devices.first { $0.output && $0.name == name })
+        let headphones = try XCTUnwrap(devices.first { $0.output && $0.name == "External Headphones" })
+        let audio = PerformanceAudio(); audio.volume = 0
+        defer { audio.shutdown() }
+        for device in [headphones, target, headphones, target] {
+            print("[route-check] configuring \(device.name)"); fflush(stdout)
+            let start = Date()
+            try audio.configure(device: device, format: AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!)
+            XCTAssertTrue(audio.ready)
+            XCTAssertEqual(audio.boundOutputID, device.id)
+            XCTAssertLessThan(Date().timeIntervalSince(start), 5)
+            print("[route-check] ready \(device.name)"); fflush(stdout)
+        }
+    }
+
     @MainActor func testPausingCadenzaReleasePreservesPedalReturnOnThisMac() async throws {
         guard ProcessInfo.processInfo.environment["VC_DEVICE_CHECK"] == "1" else { throw XCTSkip("Set VC_DEVICE_CHECK=1 to verify cadenza transport using silent output.") }
         let defaults = UserDefaults(suiteName: UUID().uuidString)!

@@ -112,7 +112,8 @@ final class PreparedPerformance {
     }
 }
 
-/// Control-side only. No application code executes in the output render callback.
+/// Control-side playback. Mixed-channel aggregates use a small realtime output
+/// adapter; score, UI and transport decisions stay outside the render callback.
 @MainActor final class PerformanceAudio {
     private(set) var engine = AVAudioEngine()
     private var music = AVAudioPlayerNode()
@@ -132,12 +133,22 @@ final class PreparedPerformance {
     private var notification: NSObjectProtocol?
     private var format: AVAudioFormat?
     private var configuration: UInt64 = 0
+    private var hardwareOutput: HardwareOutput?
+    var boundOutputID: AudioDeviceID { hardwareOutput?.unit.deviceID ?? AudioDevices.boundID(engine.outputNode) }
+    private var outputLatency: Double { hardwareOutput?.presentationLatency ?? engine.outputNode.presentationLatency }
     nonisolated static var hostSeconds: Double { AVAudioTime.seconds(forHostTime: mach_absolute_time()) }
     func configure(device: AudioDevice, format: AVAudioFormat) throws {
         shutdown()
+        var configured = false
+        defer { if !configured { shutdown() } }
         engine = AVAudioEngine(); music = AVAudioPlayerNode(); clicks = AVAudioPlayerNode(); auxiliary = AVAudioPlayerNode()
         performanceMixer = AVAudioMixerNode(); timePitch = AVAudioUnitTimePitch()
-        try AudioDevices.bind(engine.outputNode, device: device.id)
+        if AudioDevices.needsSeparateOutputUnit(device.id) {
+            hardwareOutput = try HardwareOutput(device: device)
+            try hardwareOutput!.prepare(engine: engine)
+        } else {
+            try AudioDevices.bind(engine.outputNode, device: device.id)
+        }
         engine.attach(music); engine.attach(clicks); engine.attach(auxiliary)
         engine.attach(performanceMixer); engine.attach(timePitch)
         try engine.connectNode(music, to: performanceMixer, format: format)
@@ -147,30 +158,36 @@ final class PreparedPerformance {
         try engine.connectNode(auxiliary, to: engine.mainMixerNode, format: AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1))
         self.device = device; self.format = format
         engine.mainMixerNode.outputVolume = volume; clicks.volume = clicksEnabled ? 1 : 0
-        engine.prepare(); try engine.start()
-        guard AudioDevices.boundID(engine.outputNode) == device.id else { shutdown(); throw NativeError.message("Output binding changed unexpectedly. Select an output again.") }
+        do {
+            engine.prepare(); try engine.start(); try hardwareOutput?.start()
+        } catch { shutdown(); throw error }
+        guard boundOutputID == device.id else { shutdown(); throw NativeError.message("Output binding changed unexpectedly. Select an output again.") }
         let identity = configuration
         notification = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in Task { @MainActor in guard let self, self.configuration == identity else { return }; self.interrupted?() } }
+        configured = true
     }
-    var ready: Bool { engine.isRunning && device != nil && AudioDevices.boundID(engine.outputNode) == device?.id }
+    var ready: Bool { engine.isRunning && device != nil && (hardwareOutput?.ready ?? (boundOutputID == device?.id)) }
     func play(_ segment: AudioSegment, immediate: Bool) throws {
         guard ready else { throw NativeError.message("Output interrupted. Select an output and supply a fresh cue.") }
         stop()
+        hardwareOutput?.hold()
         // Returns use now, with no startup lead. Preparation/pause starts retain the browser's 200 ms lead.
         let host = Self.hostSeconds + (immediate ? 0 : 0.2)
-        let at = AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: host))
+        let at = hardwareOutput == nil ? AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: host)) : nil
         music.scheduleBuffer(segment.music, at: nil)
         clicks.scheduleBuffer(segment.clicks, at: nil)
         do {
             try music.playAudio(at: at)
             try clicks.playAudio(at: at)
+            hardwareOutput?.resume(at: host)
         } catch {
             stop()
+            hardwareOutput?.resume(at: Self.hostSeconds)
             throw error
         }
         // presentationLatency includes downstream output latency; never add device latency again.
-        audibleOrigin = host + engine.outputNode.presentationLatency - segment.position
-        clockHost = host + engine.outputNode.presentationLatency + timePitch.latency
+        audibleOrigin = host + outputLatency - segment.position
+        clockHost = host + outputLatency + timePitch.latency
         clockPosition = segment.position
         audibleOrigin += timePitch.latency
     }
@@ -187,10 +204,14 @@ final class PreparedPerformance {
         music.scheduleBuffer(segment.music, at: nil)
         clicks.scheduleBuffer(segment.clicks, at: nil)
     }
-    func stop() { music.stop(); clicks.stop(); auxiliary.stop() }
+    func stop() {
+        music.stop(); clicks.stop(); auxiliary.stop()
+        hardwareOutput?.resume(at: Self.hostSeconds)
+    }
     func shutdown() {
         configuration &+= 1
         if let notification { NotificationCenter.default.removeObserver(notification) }; notification = nil
+        hardwareOutput?.stop(); hardwareOutput = nil
         stop(); engine.stop(); device = nil
     }
     func playTake(samples: [Float], sampleRate: Double) throws {
@@ -205,7 +226,7 @@ final class PreparedPerformance {
             buffer.floatChannelData![0][i] = samples[a] + Float(x-Double(a))*(samples[b]-samples[a])
         }
         auxiliary.scheduleBuffer(buffer, at: nil); try auxiliary.playAudio()
-        auxiliaryOrigin = Self.hostSeconds + engine.outputNode.presentationLatency
+        auxiliaryOrigin = Self.hostSeconds + outputLatency
     }
     func testTone() throws {
         let rate = format?.sampleRate ?? 44100
