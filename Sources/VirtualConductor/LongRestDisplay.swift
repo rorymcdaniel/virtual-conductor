@@ -13,7 +13,7 @@ struct LongRestDisplay: Equatable {
               snapshot.time < timing.musicalEnd else {
             counter = nil; cueBeat = nil; return
         }
-        var quarter = timing.midi.quarter(atSeconds: snapshot.time - timing.prepSeconds)
+        var quarter = timing.midi.quarter(atSeconds: timing.scoreTime(performanceSeconds: snapshot.time))
         // Tempo conversion can land a few ulps before an exact musical boundary.
         let boundaries = schedule.runs.flatMap { run in
             run.fullRestMeasures.map(\.startQuarter) + [run.endQuarter] +

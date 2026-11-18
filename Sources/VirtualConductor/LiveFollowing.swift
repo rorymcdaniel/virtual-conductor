@@ -81,16 +81,20 @@ extension InputCapture: FollowingInput {}
             throw MusicalError("Microphone access is required for live following. Enable it in System Settings → Privacy & Security → Microphone.")
         }
         guard token == generation else { throw CancellationError() }
-        let prep = prepared.timing.prepSeconds, midi = prepared.midi
+        let timing = prepared.timing, midi = prepared.midi
         let points = plan.waits + plan.freePassages.flatMap { [$0.start, $0.end] } + plan.cadenzas.flatMap { [$0.startQuarter, $0.returnQuarter] }
-        let limits = Array(Set([0, position, prepared.end] + points.map { prep + midi.seconds(atQuarter: $0) }))
+        let beginsInFreeTime = plan.freePassages.contains { $0.start <= timing.startQuarter && timing.startQuarter < $0.end } ||
+            plan.cadenzas.contains { $0.startQuarter <= timing.startQuarter && timing.startQuarter < $0.returnQuarter }
+        let startBoundary = beginsInFreeTime ? [timing.prepSeconds] : []
+        let limits = Array(Set([0, position, prepared.end] + startBoundary + points.filter { $0 >= timing.startQuarter }
+            .map { timing.performanceTime(scoreSeconds: midi.seconds(atQuarter: $0)) }))
             .filter { $0 >= 0 && $0 <= prepared.end }.sorted()
         var releases = Dictionary(uniqueKeysWithValues: plan.freePassages.compactMap { gap -> (Double, Double)? in
             guard !plan.waits.contains(gap.start), !plan.cadenzas.contains(where: { $0.startQuarter == gap.start }) else { return nil }
-            return (prep + midi.seconds(atQuarter: gap.start), prep + midi.seconds(atQuarter: gap.end))
+            return (timing.performanceTime(scoreSeconds: midi.seconds(atQuarter: gap.start)), timing.performanceTime(scoreSeconds: midi.seconds(atQuarter: gap.end)))
         })
         for passage in plan.cadenzas {
-            releases[prep + passage.startSeconds] = PreparedPerformance.cadenzaReleaseEnd(passage, timing: prepared.timing)
+            releases[timing.performanceTime(scoreSeconds: passage.startSeconds)] = PreparedPerformance.cadenzaReleaseEnd(passage, timing: timing)
         }
         let releaseLimits = releases
         let segments = try await Task.detached(priority: .userInitiated) {
@@ -106,8 +110,8 @@ extension InputCapture: FollowingInput {}
         self.position = position; active = true; lastTick = clock(); lastObservation = lastTick; droppedSamples = 0
         diagnostics.begin(sampleRate: capture.sampleRate, tolerance: tolerance, plan: plan, midi: prepared.midi)
         diagnostics.notice("Following started", time: clock(), kind: .started)
-        tracker.reset(notes: plan.notes, quarter: quarter(position))
-        approvedWaits = Set(plan.waits.filter { seconds($0) < position - 1e-7 })
+        tracker.reset(notes: plan.notes, quarter: max(timing.startQuarter, quarter(position)))
+        approvedWaits = Set(plan.waits.filter { $0 < timing.startQuarter || seconds($0) < position - 1e-7 })
         tempo.reset(); audio.setRate(1)
         try enter(at: position, initial: true)
     }
@@ -121,8 +125,12 @@ extension InputCapture: FollowingInput {}
         self.audio = nil; buffers = [:]; boundaries = []; queuedEnd = nil
     }
 
-    private func seconds(_ quarter: Double) -> Double { prepared!.timing.prepSeconds + prepared!.midi.seconds(atQuarter: quarter) }
-    private func quarter(_ seconds: Double) -> Double { prepared!.midi.quarter(atSeconds: seconds - prepared!.timing.prepSeconds) }
+    private func seconds(_ quarter: Double) -> Double { prepared!.timing.performanceTime(scoreSeconds: prepared!.midi.seconds(atQuarter: quarter)) }
+    private func quarter(_ seconds: Double) -> Double {
+        let timing = prepared!.timing
+        if seconds < timing.prepSeconds { return (seconds-timing.prepSeconds)/timing.leadSeconds }
+        return prepared!.midi.quarter(atSeconds: timing.scoreTime(performanceSeconds: seconds))
+    }
 
     private func enter(at location: Double, initial: Bool = false, fromAccompaniment: Bool = false) throws {
         guard let plan, let prepared, let audio else { return }
@@ -131,7 +139,7 @@ extension InputCapture: FollowingInput {}
             stop(); status = .finished; completed?(); return
         }
         let q = quarter(location)
-        if let cadenza = plan.cadenzas.first(where: { abs($0.startQuarter - q) < 1e-7 }) {
+        if let cadenza = plan.cadenzas.first(where: { q >= $0.startQuarter - 1e-7 && q < $0.returnQuarter - 1e-7 }) {
             if !fromAccompaniment { audio.stop() }
             clearCadenzaAnalysis()
             phase = .cadenza(cadenza); status = .cadenza
@@ -227,12 +235,12 @@ extension InputCapture: FollowingInput {}
                 writtenRest = !expectingSound
                 let age = now - tracker.lastMatch
                 let input = FollowingTempoInput.accompanied(delta: delta, tolerance: tolerance / 100, tracker: tracker,
-                    notes: plan.notes, midi: prepared.midi, scoreTime: position - prepared.timing.prepSeconds, time: now)
+                    notes: plan.notes, midi: prepared.midi, scoreTime: prepared.timing.scoreTime(performanceSeconds: position), time: now)
                 let before = tempo
                 let rate = tempo.update(input)
                 audio.setRate(rate)
                 let beatSeconds = prepared.midi.seconds(atQuarter: q + 0.001) - prepared.midi.seconds(atQuarter: q)
-                diagnostics.recordControl(FollowingControlDecision(time: now, scoreTime: position - prepared.timing.prepSeconds,
+                diagnostics.recordControl(FollowingControlDecision(time: now, scoreTime: prepared.timing.scoreTime(performanceSeconds: position),
                     plannedBPM: 0.06 / beatSeconds, before: before, input: input, rate: rate))
                 if expectingSound && age > 1.5 && now - entered > 1.5 {
                     status = .lost; detail = "Keeping moving · listening for your position"
@@ -304,7 +312,7 @@ extension InputCapture: FollowingInput {}
         analyzer = nil; analysisOrigin = nil; analysisSamples = 0; status = .lost
         // Keep sounding identity even immediately before a wait boundary:
         // discarding timing must never turn a held note into a new attack.
-        if let plan { tracker.reset(notes: plan.notes, quarter: quarter(position), preservingSound: true) }
+        if let plan, let prepared { tracker.reset(notes: plan.notes, quarter: max(prepared.timing.startQuarter, quarter(position)), preservingSound: true) }
     }
 
     private func poll(now: Double) {

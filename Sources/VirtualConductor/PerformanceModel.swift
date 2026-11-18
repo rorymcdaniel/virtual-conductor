@@ -193,18 +193,28 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
     }
     func selectSoloStaff(_ id: MusicXMLStaffID?) { scorePreparation.selectStaff(id) }
     func setLongRestThreshold(_ value: Int) { longRestSetup.setThreshold(value, preparation: scorePreparation) }
+    @discardableResult func chooseStartMeasure(_ text: String) -> Bool {
+        guard !locked, let prepared else { return false }
+        guard let measure = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+              (1...prepared.midi.measures).contains(measure) else {
+            message = "Choose a whole start measure from 1 to \(prepared.midi.measures)."
+            return false
+        }
+        rebuild(startMeasure: measure)
+        return true
+    }
     func reset() {
         run &+= 1; following.stop(); audio.stop(); audio.setRate(1); position = 0; segmentStart = 0; passageIndex = 0
         state = prepared == nil ? .empty : .ready
-        message = prepared == nil ? "Choose matching MIDI and WAV exports." : "Ready. One upbeat precedes preparation."
+        message = prepared.map { "Ready at measure \($0.timing.startMeasure). One upbeat precedes preparation." } ?? "Choose matching MIDI and WAV exports."
     }
-    func rebuild(passages values: [CadenzaPassage]? = nil) {
+    func rebuild(passages values: [CadenzaPassage]? = nil, startMeasure: Int? = nil) {
         guard let old = prepared else { return }
-        let selected = values ?? passages, prep = preparation
+        let selected = values ?? passages, prep = preparation, start = startMeasure ?? old.timing.startMeasure
         run &+= 1; let token = run; following.stop(); audio.stop(); state = .loading
         Task {
             do {
-                let new = try await Task.detached { try PreparedPerformance(midi:old.midi,source:old.source,preparation:prep,passages:selected) }.value
+                let new = try await Task.detached { try PreparedPerformance(midi:old.midi,source:old.source,preparation:prep,passages:selected,startMeasure:start) }.value
                 guard token == run else { return }
                 prepared = new; passages = selected; reset()
             } catch { guard token == run else { return }; state = .error; message = error.localizedDescription }

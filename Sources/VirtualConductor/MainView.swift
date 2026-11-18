@@ -7,6 +7,8 @@ import ConductorCore
 struct MainView: View {
     @ObservedObject var model: PerformanceModel
     @State private var museScoreOpen = false
+    @State private var startMeasureText = "1"
+    @FocusState private var startMeasureFocused: Bool
     private let accent = Color(red: 0.63, green: 0.90, blue: 0.83)
     private var editable: Bool { model.prepared != nil && [.ready, .paused, .waiting, .finished, .interrupted].contains(model.state) }
     private var outputs: [AudioDevice] { model.devices.filter(\.output) }
@@ -60,6 +62,7 @@ struct MainView: View {
         .tint(accent)
         .frame(minWidth: 980, minHeight: 640)
         .onChange(of: museScoreOpen) { _, open in model.filePanelOpen = open }
+        .onReceive(model.$prepared) { startMeasureText = String($0?.timing.startMeasure ?? 1) }
         .sheet(isPresented: $museScoreOpen) {
             MuseScoreSetupView(link: model.museScore) { files in
                 museScoreOpen = false; model.load(midi: files.midi, wav: files.wav, musicXML: files.musicXML, scoreIdentity: model.museScore.sourceURL, linked: true)
@@ -106,6 +109,20 @@ struct MainView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(model.prepared == nil || model.outputMissing || ![.ready, .running, .paused, .finished].contains(model.state))
                 Button("Reset", action: model.reset).disabled(model.prepared == nil || [.loading, .starting].contains(model.state))
+                Spacer()
+                Toggle("Clicks", isOn: $model.clicks).toggleStyle(.checkbox)
+                Toggle("Guide", isOn: $model.guide).toggleStyle(.checkbox)
+                Image(systemName: "speaker.wave.2").foregroundStyle(.secondary)
+                Slider(value: $model.volume, in: 0...1).frame(width: 110).accessibilityLabel("Playback volume")
+            }
+            HStack(spacing: 10) {
+                Text("Start at measure")
+                TextField("Measure", text: $startMeasureText)
+                    .frame(width: 64).textFieldStyle(.roundedBorder).monospacedDigit()
+                    .accessibilityLabel("Start at measure").focused($startMeasureFocused)
+                    .onSubmit(applyStartMeasure).disabled(!editable)
+                Button("Go", action: applyStartMeasure).disabled(!editable)
+                    .help("Prepare a fresh start at this measure")
                 Divider().frame(height: 22)
                 Stepper(value: $model.preparation, in: 0...99) {
                     Text("Preparation: \(model.preparation) \(model.preparation == 1 ? "measure" : "measures")").monospacedDigit()
@@ -114,10 +131,6 @@ struct MainView: View {
                 .disabled(model.locked || [.paused, .waiting].contains(model.state))
                 .onChange(of: model.preparation) { _, _ in model.rebuild() }
                 Spacer()
-                Toggle("Clicks", isOn: $model.clicks).toggleStyle(.checkbox)
-                Toggle("Guide", isOn: $model.guide).toggleStyle(.checkbox)
-                Image(systemName: "speaker.wave.2").foregroundStyle(.secondary)
-                Slider(value: $model.volume, in: 0...1).frame(width: 110).accessibilityLabel("Playback volume")
             }
             HStack(spacing: 10) {
                 Picker("Audio output", selection: Binding(get: { model.outputID }, set: { model.outputID = $0; model.chooseOutput(remember: true) })) {
@@ -194,6 +207,10 @@ struct MainView: View {
         .controlSize(.regular)
         .padding(.horizontal, 28).padding(.top, 20).padding(.bottom, 18)
         .background(Color(red: 0.07, green: 0.09, blue: 0.10))
+    }
+
+    private func applyStartMeasure() {
+        if model.chooseStartMeasure(startMeasureText) { startMeasureFocused = false }
     }
 }
 

@@ -15,25 +15,27 @@ final class PreparedPerformance {
     let passages: [CompiledCadenza]
     let segments: [AudioSegment]
     var duration: Double { Double(source.frameLength) / source.format.sampleRate }
-    var end: Double { timing.prepSeconds + max(duration, midi.duration) }
-    init(midi: MIDIFile, source: AVAudioPCMBuffer, preparation: Int, passages: [CadenzaPassage]) throws {
+    var end: Double { timing.performanceTime(scoreSeconds: max(duration, midi.duration)) }
+    init(midi: MIDIFile, source: AVAudioPCMBuffer, preparation: Int, passages: [CadenzaPassage], startMeasure: Int = 1) throws {
         self.midi = midi; self.source = source
-        let timing = try PerformanceTiming(midi: midi, preparatoryMeasures: preparation)
+        let timing = try PerformanceTiming(midi: midi, preparatoryMeasures: preparation, startMeasure: startMeasure)
         self.timing = timing
         let compiled = try compileCadenzas(passages, midi: midi, audioDuration: Double(source.frameLength) / source.format.sampleRate)
+            .filter { $0.returnQuarter > timing.startQuarter }
         self.passages = compiled
-        let end = timing.prepSeconds + max(Double(source.frameLength) / source.format.sampleRate, midi.duration)
-        let starts = [0.0] + compiled.map { timing.prepSeconds + $0.returnSeconds }
-        let ends = compiled.map { timing.prepSeconds + $0.startSeconds } + [end]
+        let end = timing.performanceTime(scoreSeconds: max(Double(source.frameLength) / source.format.sampleRate, midi.duration))
+        let starts = [0.0] + compiled.map { timing.performanceTime(scoreSeconds: $0.returnSeconds) }
+        let ends = compiled.map { max(timing.prepSeconds, timing.performanceTime(scoreSeconds: $0.startSeconds)) } + [end]
         segments = try zip(starts, ends).enumerated().map { index, bounds in
-            let release = index < compiled.count ? Self.cadenzaReleaseEnd(compiled[index], timing: timing) : nil
+            let release = index < compiled.count && compiled[index].startQuarter >= timing.startQuarter
+                ? Self.cadenzaReleaseEnd(compiled[index], timing: timing) : nil
             return try Self.makeSegment(source: source, timing: timing, position: bounds.0, end: bounds.1, ringOutUntil: release)
         }
     }
     /// A cadenza may be placed in sounding audio: never play arbitrarily far into
     /// the skipped passage when no quiet gap can be found.
     static func cadenzaReleaseEnd(_ passage: CompiledCadenza, timing: PerformanceTiming) -> Double {
-        timing.prepSeconds + min(passage.returnSeconds, passage.startSeconds + 3)
+        timing.performanceTime(scoreSeconds: min(passage.returnSeconds, passage.startSeconds + 3))
     }
     static func load(_ url: URL) throws -> AVAudioPCMBuffer {
         let file = try AVAudioFile(forReading: url)
@@ -48,14 +50,15 @@ final class PreparedPerformance {
         let first = Int64((position * rate).rounded()), last = Int64((end * rate).rounded())
         let count = max(1, last - first)
         let prepFrame = Int64((timing.prepSeconds * rate).rounded())
+        let sourceOrigin = prepFrame - Int64((timing.startSeconds * rate).rounded())
         var musicEnd = last
         if let limit = ringOutUntil, last >= prepFrame {
             // Continue the rendered release into a notated rest. Stop looking at the
             // first 50 ms of quiet, or the next orchestral entrance, whichever is first.
-            let limitFrame = min(Int64((limit * rate).rounded()), prepFrame + Int64(source.frameLength))
+            let limitFrame = min(Int64((limit * rate).rounded()), sourceOrigin + Int64(source.frameLength))
             var quietFrames = 0
             while musicEnd < limitFrame {
-                let offset = Int(musicEnd - prepFrame)
+                let offset = Int(musicEnd - sourceOrigin)
                 let audible = (0..<Int(source.format.channelCount)).contains { abs(source.floatChannelData![$0][offset]) > 0.0001 }
                 quietFrames = audible ? 0 : quietFrames + 1
                 musicEnd += 1
@@ -67,8 +70,8 @@ final class PreparedPerformance {
         music.frameLength = UInt32(musicCount); clicks.frameLength = UInt32(count)
         for c in 0..<Int(source.format.channelCount) {
             let dest = music.floatChannelData![c]; dest.initialize(repeating: 0, count: Int(musicCount))
-            let from = max(first, prepFrame), to = min(musicEnd, prepFrame + Int64(source.frameLength))
-            if to > from { dest.advanced(by: Int(from-first)).update(from: source.floatChannelData![c].advanced(by: Int(from-prepFrame)), count: Int(to-from)) }
+            let from = max(first, prepFrame), to = min(musicEnd, sourceOrigin + Int64(source.frameLength))
+            if to > from { dest.advanced(by: Int(from-first)).update(from: source.floatChannelData![c].advanced(by: Int(from-sourceOrigin)), count: Int(to-from)) }
         }
         // Smooth the end of a release even when the safety limit, rather than
         // silence, ended it. The logical cutoff and click buffer stay unchanged.
