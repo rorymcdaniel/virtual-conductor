@@ -10,10 +10,11 @@ final class DeviceBindingTests: XCTestCase {
         }
         let devices = try AudioDevices.list()
         let target = try XCTUnwrap(devices.first { $0.output && $0.name == name })
-        let headphones = try XCTUnwrap(devices.first { $0.output && $0.name == "External Headphones" })
+        let ordinary = try XCTUnwrap(devices.first { $0.output && $0.name == "External Headphones" }
+            ?? devices.first { $0.output && $0.name == "MacBook Pro Speakers" })
         let audio = PerformanceAudio(); audio.volume = 0
         defer { audio.shutdown() }
-        for device in [headphones, target, headphones, target] {
+        for device in [ordinary, target, ordinary, target] {
             print("[route-check] configuring \(device.name)"); fflush(stdout)
             let start = Date()
             try audio.configure(device: device, format: AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!)

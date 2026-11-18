@@ -36,8 +36,17 @@ final class AudioDevices {
     static func needsSeparateOutputUnit(_ id: AudioObjectID) -> Bool {
         // AVAudioEngine's hardware-format discovery loops on this mixed-width
         // aggregate (for example 2-channel headphones + BlackHole 16ch).
-        let counts = objectIDs(id, selector: kAudioAggregateDevicePropertyActiveSubDeviceList)
-            .map { channels($0, input: false) }.filter { $0 > 0 }
+        let active = objectIDs(id, selector: kAudioAggregateDevicePropertyActiveSubDeviceList)
+        guard !active.isEmpty else { return false }
+        // With the headphones unplugged, only the loopback member remains.
+        // AVAudioEngine can still hang discovering that aggregate’s format.
+        var address = AudioObjectPropertyAddress(mSelector: kAudioAggregateDevicePropertyFullSubDeviceList,
+            mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var members: Unmanaged<CFArray>?
+        var size = UInt32(MemoryLayout.size(ofValue: members))
+        if AudioObjectGetPropertyData(id, &address, 0, nil, &size, &members) == noErr,
+           let all = members?.takeRetainedValue(), CFArrayGetCount(all) > active.count { return true }
+        let counts = active.map { channels($0, input: false) }.filter { $0 > 0 }
         return Set(counts).count > 1
     }
     static func outputPresentationLatency(_ id: AudioObjectID, sampleRate: Double) -> Double {
