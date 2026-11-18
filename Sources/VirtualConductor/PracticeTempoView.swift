@@ -19,7 +19,7 @@ struct PracticeTempoView: View {
     private static func number(_ value: Double, precision: Int = 3) -> String {
         value.formatted(.number.locale(Locale(identifier: "en_US_POSIX")).grouping(.never).precision(.fractionLength(0...precision)))
     }
-    private static func location(_ q: Double) -> String {
+    static func location(_ q: Double) -> String {
         "Measure \(Int(q / 4) + 1), beat \(number(q.truncatingRemainder(dividingBy: 4) + 1, precision: 7))"
     }
     private var quarter: Double? {
@@ -33,6 +33,10 @@ struct PracticeTempoView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Practice tempo").font(.title2.bold())
+            if let practice = model.prepared?.practice {
+                TempoMapView(entries: practice.entries, end: practice.planned.endQuarter, selected: quarter, select: select)
+                Divider()
+            }
             HStack {
                 Text("Measure")
                 TextField("Measure", text: $measure).frame(width: 60)
@@ -57,23 +61,8 @@ struct PracticeTempoView: View {
             if let last = model.following.lastFollowedBPM {
                 Button("Use last followed tempo · \(Self.number(last)) BPM") { bpm = Self.number(last) }
             }
-            if let marks = model.prepared?.practice.marks, !marks.isEmpty {
-                Text("Your markings").font(.headline)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(marks, id: \.quarter) { mark in
-                            HStack {
-                                Button("\(Self.location(mark.quarter)) · \(Self.number(mark.bpm)) BPM") {
-                                    measure = String(Int(mark.quarter / 4) + 1)
-                                    beat = Self.number(mark.quarter.truncatingRemainder(dividingBy: 4) + 1, precision: 7)
-                                    bpm = Self.number(mark.bpm)
-                                }
-                                Spacer()
-                                Button("Remove") { save(marks.filter { $0.quarter != mark.quarter }) }
-                            }
-                        }
-                    }
-                }.frame(maxHeight: 135)
+            if let marks = model.prepared?.practice.marks, let q = quarter, marks.contains(where: { $0.quarter == q }) {
+                Button("Remove practice marking") { save(marks.filter { $0.quarter != q }) }
             }
             if !error.isEmpty { Text(error).foregroundStyle(.orange) }
             HStack {
@@ -88,11 +77,17 @@ struct PracticeTempoView: View {
                 }.keyboardShortcut(.defaultAction)
             }
         }
-        .padding(24).frame(width: 490)
+        .padding(24).frame(width: 680)
         .onChange(of: quarter) { _, q in
             error = ""
             if let q, let practice = model.prepared?.practice { bpm = Self.number(practice.bpm(atQuarter: q)) }
         }
+    }
+
+    private func select(_ entry: PracticeTempo.Entry) {
+        measure = String(Int(entry.quarter / 4) + 1)
+        beat = Self.number(entry.quarter.truncatingRemainder(dividingBy: 4) + 1, precision: 7)
+        bpm = Self.number(entry.bpm)
     }
 
     private func save(_ marks: [PracticeTempoMark]) {
