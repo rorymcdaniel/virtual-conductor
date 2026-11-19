@@ -190,6 +190,26 @@ final class SoloFollowingTests: XCTestCase {
         let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: cadenzas)
         XCTAssertEqual(plan.freePassages, [PassageRange(start: 4, end: 8)])
     }
+    func testDistinctWrittenPhraseRecoversAfterSeveralInaudibleCadenzaNotes() throws {
+        let pitches = [60, 61, 62, 63, 64, 65, 66, 70, 69, 67, 68, 72]
+        let notes = pitches.enumerated().map { MIDINote(pitch: $1, startQuarter: Double($0), endQuarter: Double($0 + 1)) }
+        let midi = try FollowingFixture.midi()
+        var tracker = SoloTracker()
+        func attack(_ pitch: Int, _ time: Double) -> Int? {
+            for offset in [0.0, 0.01] {
+                if let match = tracker.observe(pitch: pitch, time: time + offset, notes: notes, expectedQuarter: 1,
+                                               free: true, midi: midi, throughQuarter: 11) { return match }
+            }
+            return nil
+        }
+        XCTAssertEqual(attack(60, 0), 0)
+        XCTAssertNil(attack(70, 1))
+        XCTAssertNil(attack(69, 12))
+        XCTAssertNil(attack(67, 12.1))
+        XCTAssertEqual(attack(68, 13.5), 10)
+        XCTAssertEqual(attack(72, 16), 11)
+    }
+
     func testTrackerToleratesWrongAndSkippedNotesWithoutAdvancingOnHeldPitch() throws {
         let notes = try FollowingFixture.score().staves[0].notes, midi = try FollowingFixture.midi()
         var tracker = SoloTracker()
@@ -721,6 +741,42 @@ final class SoloFollowingTests: XCTestCase {
         audio.sourcePosition = 1; now = 1; following.tick()
         XCTAssertEqual(audio.stops, stops); XCTAssertEqual(audio.played.count, 1)
     }
+    func testWrittenCadenzaWaitsForTheFinalPhraseBeforeAcceptingTheSharedAttack() async throws {
+        let saved = CadenzaPassage(startMeasure: 1, startBeat: 2, returnMeasure: 3, returnBeat: 1)
+        let prepared = try FollowingFixture.prepared(cadenzas: [saved])
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [],
+                                     cadenzas: prepared.passages, followWrittenCadenzas: true)
+        let audio = FollowingTestAudio()
+        var now = 0.0
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: FollowingTestInput(),
+                                      clock: { now }, permission: { true })
+        defer { following.stop() }
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        now = prepared.timing.prepSeconds
+        audio.sourcePosition = now
+        following.tick()
+        func attack(_ pitch: Int, after delay: Double) {
+            now += delay
+            following.observe(pitch: pitch, time: now - 0.01)
+            following.observe(pitch: pitch, time: now)
+            following.tick()
+        }
+        for (pitch, delay) in [(60, 0.1), (62, 0.1), (64, 0.7), (65, 1.8), (60, 0.3), (62, 2.4)] {
+            attack(pitch, after: delay)
+        }
+        attack(60, after: 0.2) // The return pitch played two notes too early.
+        XCTAssertEqual(audio.played.count, 1)
+        attack(64, after: 0.2)
+        attack(65, after: 0.2)
+        now += 10
+        following.observe(pitch: 65, time: now)
+        following.tick()
+        XCTAssertEqual(audio.played.count, 1)
+        attack(60, after: 0.1)
+        XCTAssertEqual(audio.played.map(\.position), [0, 4.5])
+        XCTAssertEqual(audio.rates.last, 1)
+    }
+
     func testFreeFollowingWaitsThroughPauseAndReturnsAtPlannedTempo() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0

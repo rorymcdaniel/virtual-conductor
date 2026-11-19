@@ -143,6 +143,7 @@ public struct SoloTracker: Codable, Sendable {
     // Written note whose lead-in is sounding. Only its resolution advances the score.
     private var gracePrincipal: Int?
     private var graceResolutionTime: Double?
+    private var unmatchedAttacks: [Int]?
     public func isPlayingGrace(at time: Double) -> Bool {
         gracePrincipal != nil && time - lastMatch < FollowingTempo.recentMatchWindow
     }
@@ -153,7 +154,8 @@ public struct SoloTracker: Codable, Sendable {
         let validIndex = index.map { $0 >= 0 && $0 < noteCount } ?? true
         let validPitches = [previousPitch, candidatePitch].allSatisfy { $0.map { (0...127).contains($0) } ?? true }
         let validGrace = gracePrincipal.map { (0..<noteCount).contains($0) } ?? true
-        return validIndex && validGrace && (graceResolutionTime?.isFinite ?? true) &&
+        let validPhrase = unmatchedAttacks.map { $0.count <= 4 && $0.allSatisfy { (0...127).contains($0) } } ?? true
+        return validPhrase && validIndex && validGrace && (graceResolutionTime?.isFinite ?? true) &&
             validPitches && searchStart >= 0 && searchStart <= noteCount &&
             candidateCount >= 0 && candidateCount < Int.max / 2 && silentFrames >= 0 && silentFrames < Int.max / 2 &&
             rate.isFinite && (0.1...4).contains(rate) && candidateSince.isFinite &&
@@ -211,6 +213,7 @@ public struct SoloTracker: Codable, Sendable {
                     // phrase from the principal rather than fitting across it.
                     lastAttack = candidateSince
                     anchors = [Anchor(scoreTime: midi.seconds(atQuarter: note.startQuarter), hostTime: lastAttack)]
+                    unmatchedAttacks = nil
                     index = principal; lastMatch = time; releasedAt = nil; gracePrincipal = nil
                     graceResolutionTime = lastAttack
                     return principal
@@ -250,6 +253,11 @@ public struct SoloTracker: Codable, Sendable {
                 if (0.1...4).contains(interval / (onset - lastAttack)) { candidates.append(next) }
             }
         }
+        // Skipping a missed note can recover position inside a solo. Jumping
+        // straight to the shared entrance would start audible playback early.
+        if free && throughQuarter.isFinite {
+            candidates.removeAll { $0 != next && notes[$0].startQuarter >= throughQuarter - 1e-7 }
+        }
         if repeatedAccent, let index, notes[index].pitch == pitch { candidates = candidates.filter { $0 == next } }
         // Prefer a written attack if the player is actually on that note.
         // Otherwise a nearby notated ornament identifies its specific principal,
@@ -260,6 +268,7 @@ public struct SoloTracker: Codable, Sendable {
         }
         if let grace = Self.principalForGrace(in: candidates, notes: notes, pitch: pitch, next: next,
                                            quarter: expectedQuarter, through: throughQuarter, free: free, ordinary: nearest) {
+            unmatchedAttacks = nil
             gracePrincipal = grace; lastMatch = time; releasedAt = nil
             tempoConfirmed = false; pendingTempoRate = nil
             return nil
@@ -276,12 +285,18 @@ public struct SoloTracker: Codable, Sendable {
         // the soloist actually played before falling back to transport proximity.
         let sequential = !free && ordinary.count > 1 && ordinary.contains(next) &&
             continuesGracePhrase(at: onset, next: next, notes: notes, midi: midi)
-        guard let match = sequential ? next : nearest else {
+        var recognized = sequential ? next : nearest
+        if recognized == nil, free, throughQuarter.isFinite {
+            recognized = recoverPhrase(pitch: pitch, notes: notes, next: next, through: throughQuarter)
+            if recognized != nil { anchors = [] }
+        }
+        guard let match = recognized else {
             // An unrecognized pitch supplies no timing evidence. Keep the
             // previous phrase so the next correct attack can corroborate it.
             if !free { tempoConfirmed = false; pendingTempoRate = nil }
             return nil
         }
+        unmatchedAttacks = nil
         // Reacquiring the same written note after a gap refreshes position
         // confidence. Its original onset still belongs to this phrase.
         if !free, match == index {
@@ -326,6 +341,23 @@ public struct SoloTracker: Codable, Sendable {
             }
         }
         index = match; lastMatch = time; lastAttack = onset; releasedAt = nil
+        return match
+    }
+
+    /// After missing several notes, reacquire only a unique sequence of four
+    /// fresh attacks within the remaining passage. Pauses carry no position.
+    private mutating func recoverPhrase(pitch: Int, notes: [MIDINote], next: Int, through: Double) -> Int? {
+        let phrase = Array((unmatchedAttacks ?? []).suffix(3)) + [pitch]
+        unmatchedAttacks = phrase
+        guard phrase.count == 4, Set(phrase).count >= 3, next + 3 < notes.count else { return nil }
+        var match: Int?
+        for end in (next + 3)..<notes.count {
+            if notes[end].startQuarter > through + 1e-7 { break }
+            if notes[(end - 3)...end].map(\.pitch) == phrase {
+                guard match == nil else { return nil }
+                match = end
+            }
+        }
         return match
     }
 

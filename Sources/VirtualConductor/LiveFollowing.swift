@@ -350,6 +350,13 @@ extension InputCapture: FollowingInput {}
             return
         }
         if batch.followsGap { resetAnalysis("Gap in microphone timestamps") }
+        let returnCue: (preceding: Int, entrance: Int)?
+        if case .free(let range) = phase, let plan, let index = tracker.index,
+           index + 1 < plan.notes.count, abs(plan.notes[index + 1].startQuarter - range.end) < 1e-7 {
+            returnCue = (plan.notes[index].pitch, plan.notes[index + 1].pitch)
+        } else {
+            returnCue = nil
+        }
         let processor = analyzer ?? SoloAudioAnalyzer(sampleRate: capture.sampleRate)
         // The analyzer counts samples across calls. Map this batch onto the
         // microphone clock even if its delivery or the UI tick ran late.
@@ -361,7 +368,7 @@ extension InputCapture: FollowingInput {}
         Task {
             let (updated, observations) = await Task.detached(priority: .userInitiated) {
                 var updated = processor
-                let observations = updated.process(incoming)
+                let observations = updated.process(incoming, returnCue: returnCue)
                 return (updated, observations)
             }.value
             guard token == generation, active else { return }

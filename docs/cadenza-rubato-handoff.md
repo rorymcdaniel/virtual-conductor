@@ -1,6 +1,21 @@
 # Cadenza handoff through a rubato lead-in
 
-## Accepted behavior
+## Written cadenza following
+
+With live following enabled, **Follow written cadenzas** reads the selected horn
+staff and all the orchestral staves. In the Strauss export it finds the release
+at measure 7 beat 1½ and the shared attack at measure 13 beat 1. A saved pedal
+passage for that handoff can be used again by selecting **Use pedal passages**.
+
+A local release-build check loaded the matching MIDI, WAV and MusicXML and fed
+the Baborák recording through the live microphone-processing path in 40 ms
+blocks. Starting at the orchestral release, the conductor commanded measure 13
+at recording time 44.08 seconds. The reference alignment places the entrance
+at 44.04 seconds. This replay measured the playback command with simulated
+output. Audible timing through the player’s microphone and headphones still
+needs a rehearsal.
+
+## Pedal-controlled behavior
 
 The performer reported that rubato in measure 7 led to lost tracking before a
 configured cadenza beginning in measure 8. The agreed change is to begin manual

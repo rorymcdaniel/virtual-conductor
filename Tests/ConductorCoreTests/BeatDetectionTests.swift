@@ -23,6 +23,33 @@ enum BeatDetectionFixture {
 }
 
 final class BeatDetectionTests: XCTestCase {
+    func testOrchestralReturnPitchResolvesThroughThePrecedingNotesDecay() throws {
+        let rate = 12000.0
+        func phrase(preceding: Int, attack: Int) -> [Float] {
+            (0..<6000).map { frame in
+                let time = Double(frame) / rate
+                func tone(_ pitch: Int) -> Double {
+                    sin(2 * .pi * 440 * pow(2, Double(pitch - 69) / 12) * time)
+                }
+                let decay = time < 0.25 ? 1 : exp(-(time - 0.25) * 6)
+                return Float(0.1 * (decay * tone(preceding) + (time >= 0.25 ? tone(attack) : 0)))
+            }
+        }
+        for (preceding, cue) in [(70, 63), (67, 72)] {
+            for attack in [cue, cue - 12, cue - 1, cue + 1] {
+                var analyzer = SoloAudioAnalyzer(sampleRate: rate)
+                let firstCue = analyzer.process(phrase(preceding: preceding, attack: attack), returnCue: (preceding, cue)).first { $0.pitch == cue }
+                if attack == cue {
+                    let entrance = try XCTUnwrap(firstCue)
+                    XCTAssertGreaterThanOrEqual(entrance.time, 0.24)
+                    XCTAssertLessThan(entrance.time, 0.30)
+                } else {
+                    XCTAssertNil(firstCue, "A different played note cannot cue the orchestra")
+                }
+            }
+        }
+    }
+
     func testShortRepeatedArticulationsReachLiveTempoTracker() throws {
         let pitches = Array(repeating: 60, count: 8), midi = try FollowingFixture.midi()
         let notes = pitches.enumerated().map { MIDINote(pitch: $1, startQuarter: Double($0), endQuarter: Double($0 + 1)) }
