@@ -36,7 +36,13 @@ struct FollowingView: View {
                 ForEach(model.devices.filter(\.input)) { device in Text(device.name).tag(device.id) }
             }
             Stepper("Global tempo tolerance: ±\(Int(tolerance))%", value: $tolerance, in: 0...75, step: 1)
-            Text("Playback follows within this tolerance unless you mark a free passage or a wait. Pedal-controlled cadenzas take priority.")
+            Picker("Cadenzas", selection: $values.followWrittenCadenzas) {
+                Text("Follow written cadenzas").tag(true)
+                Text("Use pedal passages").tag(false)
+            }.pickerStyle(.segmented)
+            Text(values.followWrittenCadenzas
+                 ? "The orchestra listens through extended written solos and joins at its next entrance. Right Arrow can cue the return."
+                 : "Enter start and return beats in Pedal passages for an improvised or personal cadenza. Right Arrow brings the orchestra back.")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
             Picker("Edit", selection: $editingFree) {
@@ -94,7 +100,7 @@ struct FollowingView: View {
     }
     private var freeEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Mark where you want to play freely while the orchestra rests. At Return, bounded playback resumes. Fractional beats are supported.")
+            Text("Add a free passage to follow a shorter solo or choose different boundaries.")
                 .font(.callout)
             Grid(alignment: .leading) {
                 GridRow { Text(""); Text("Measure"); Text("Beat") }
@@ -115,7 +121,13 @@ struct FollowingView: View {
             }
             ScrollView {
                 VStack(alignment: .leading) {
-                    if values.freePassages.isEmpty { Text("No free passages.").foregroundStyle(.secondary) }
+                    let detected = (try? model.followingPlan(configuration: values))?.writtenCadenzas ?? []
+                    ForEach(detected, id: \.start) { range in
+                        Text("From score · \(label(range.start)) → \(label(range.end))")
+                    }
+                    if detected.isEmpty && values.freePassages.isEmpty {
+                        Text("No free passages.").foregroundStyle(.secondary)
+                    }
                     ForEach(Array(values.freePassages.enumerated()), id: \.offset) { index, passage in
                         HStack {
                             Text("\(label(passage.start)) → \(label(passage.end))")

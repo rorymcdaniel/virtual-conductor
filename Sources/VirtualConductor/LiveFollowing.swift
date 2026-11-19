@@ -161,7 +161,10 @@ extension InputCapture: FollowingInput {}
                 tracker.index.map { plan.notes[$0].endQuarter >= q - 1e-7 && plan.notes[$0].startQuarter <= q + 1e-7 } == true
             if !carriesPhrase { tracker.reset(notes: plan.notes, quarter: q) }
             status = .following
-            detail = "Solo passage · play freely · Right Arrow cues the return"; return
+            detail = plan.writtenCadenzas.contains(free)
+                ? "Written cadenza · listening for the orchestral entrance"
+                : "Solo passage · play freely · Right Arrow cues the return"
+            return
         }
         guard let buffer = buffers[location] else { throw MusicalError("Following playback boundary is unavailable. Reset and start again.") }
         phase = .audio; audioEnd = buffer.end

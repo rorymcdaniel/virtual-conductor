@@ -5,6 +5,7 @@ import ConductorCore
 // The editable draft and on-disk format share the existing flat JSON schema.
 struct FollowingConfiguration: Codable {
     var enabled = false
+    var followWrittenCadenzas = true
     var solo: MusicXMLStaffID?
     var waits: [WaitPoint] = []
     var freePassages: [PassageRange] = []
@@ -13,6 +14,7 @@ struct FollowingConfiguration: Codable {
     init(from decoder: Decoder) throws {
         let fields = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try fields.decode(Bool.self, forKey: .enabled)
+        followWrittenCadenzas = try fields.decodeIfPresent(Bool.self, forKey: .followWrittenCadenzas) ?? true
         solo = try fields.decodeIfPresent(MusicXMLStaffID.self, forKey: .solo)
         waits = try fields.decode([WaitPoint].self, forKey: .waits)
         freePassages = try fields.decodeIfPresent([PassageRange].self, forKey: .freePassages) ?? []

@@ -4,7 +4,7 @@ Native offline macOS rehearsal app built with SwiftUI, AppKit, AVAudioEngine and
 
 The compiler deployment target is 27.0, the highest accepted by the installed SDK; the app bundle and executable enforce the supported macOS 27.2 runtime minimum. Use the build script to validate the host and SDK minimums.
 
-Follow a MIDI tempo map with a traced conducting pattern while playing a matching WAV accompaniment. Configure cadenza stops and cue prepared returns with a right-arrow pedal. Record and review a solo interpretation, then export its WAV and approved tempo CSV.
+Follow a MIDI tempo map with a traced conducting pattern while playing a matching WAV accompaniment. Follow written cadenzas by microphone or cue improvised cadenzas with a right-arrow pedal. Record and review a solo interpretation, then export its WAV and approved tempo CSV.
 
 ## Build and launch
 
@@ -26,7 +26,7 @@ the upbeat and any preparation before measure 1 are silent. Pause/Resume continu
 from the paused position; Reset returns to the chosen start with preparation again.
 See [starting at a measure](docs/start-at-measure.md).
 
-Cadenza settings are stored in `~/Library/Application Support/VirtualConductor/cadenzas-v1.json`, keyed by exact MIDI SHA-256. Browser settings can be imported explicitly through the versioned JSON bridge. Changed MIDI does not inherit old boundaries. Native cadenza boundaries accept subdivisions such as beat 1.5. The orchestra’s release can ring briefly after the boundary while the cadenza indicator waits for the pedal; see [cadenza handoff behavior](docs/cadenza-rubato-handoff.md).
+Pedal passage settings are stored in `~/Library/Application Support/VirtualConductor/cadenzas-v1.json`, keyed by exact MIDI SHA-256. Browser settings can be imported explicitly through the versioned JSON bridge. Changed MIDI does not inherit old boundaries. Native cadenza boundaries accept subdivisions such as beat 1.5. The orchestra’s release can ring briefly after the boundary while the cadenza indicator waits for the pedal; see [cadenza handoff behavior](docs/cadenza-rubato-handoff.md).
 
 ## Recorded-performance timing
 
@@ -48,7 +48,11 @@ Choose **Delete** on a tempo-map row to carry the preceding tempo until the next
 
 Markings are saved on this Mac for the matching MIDI export. The conductor, clicks and accompaniment share the new pace, and live following applies its tolerance around it. Preparation that plays earlier measures uses the tempos in those measures. With matching MusicXML, the editor uses explicit score tempo marks and recognized tempo directions aligned with MIDI events. MIDI-only rehearsals use the exported tempo events, which can include individual steps in a gradual tempo change.
 
-Accompanied passages keep moving within that tolerance. Uncertain tracking holds the current pace until a consistent phrase confirms a tempo change; see [tempo confidence](docs/following-tempo-confidence.md). In **Live following → Free passages**, enter the start and return measure and beat for any unaccompanied passage where you want extreme rubato and pauses. Unmarked solo passages keep the ordinary tempo tolerance. Returns use the planned tempo. Existing configured cadenzas take priority. **Right Arrow** releases an explicit wait or cues the return from a freely followed passage. Turning following off retains fixed playback and existing cadenza controls.
+**Follow written cadenzas** is the default in Live following. For Strauss’s Second Horn Concerto, select **Corno Solo in Mib** and your microphone. The score supplies the orchestral release at measure 7, beat 1½ and the shared entrance at measure 13, beat 1. Play the written horn line with your own rubato and pauses. The orchestra listens for the return attack and resumes at the planned tempo. **Right Arrow** can cue the entrance if tracking is uncertain.
+
+**Live following → Free passages** lists the detected ranges. The app reads “Cadenza” or “Kadenz” directions during an orchestral rest. For an unlabelled passage it looks for at least two complete bars of orchestral silence containing at least three solo attacks, followed by an orchestral entrance. Enter a free passage there to specify other boundaries. If the solo rests at the return, the app counts the written rest at the planned tempo after the last note releases. If the solo holds a note across the return, use Right Arrow to choose the entrance.
+
+For an improvised or personal cadenza, choose **Use pedal passages** in Live following and enter the start and return in **Pedal passages…**. Fixed playback also uses these saved stops. Switching modes preserves the saved beats. In written mode, a saved pedal passage starting in a detected cadenza and ending at its orchestral entrance yields to the score. Other saved pedal stops still apply. Accompanied passages keep moving within the global tempo tolerance. See [tempo confidence](docs/following-tempo-confidence.md).
 
 The performance display distinguishes **Holding tempo**, **Waiting for you**, and **Tracking lost**, including with controls hidden. During accompanied playing, a mint **Holding tempo** means the app has recently matched a note and is keeping the current pace. A yellow **Holding tempo** means it is listening for the next matching note. **Tracking lost** appears in red. Small timing differences receive gentle position correction, separately limited from the established phrase tempo; see [natural following and rehearsal checks](docs/natural-following-recovery.md). Following needs a monophonic pitched solo staff and the existing linear 4/4 MusicXML mapping. Notes are interpreted in concert pitch, including MusicXML transposition. Waits must land on note attacks; rests and tied continuations cannot supply an entrance pitch.
 

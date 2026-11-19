@@ -34,11 +34,11 @@ implementation is available through **Live following…** in the app.
   headphone leakage needs real-world testing.
 - Right Arrow, already sent by the performer's foot pedal, manually releases a
   wait when entrance recognition fails.
-- Existing configured cadenza behavior is preserved and takes priority over
-  automatic soloist following, allowing the performer to vary a cadenza freely.
-- Free following applies only to unaccompanied passages the performer adds in
-  Live following, using start and return measure and beat. An empty list
-  keeps all unmarked passages on bounded playback, including solo openings.
+- **Follow written cadenzas** uses the selected solo staff and orchestral rests
+  to establish free passages. **Use pedal passages** gives the performer control
+  over the return for an improvised or personal cadenza. Both modes keep the
+  performer’s entered free passages and wait points. See the
+  [current cadenza controls](../README.md#live-soloist-following).
 - In these passages, free following tracks the performer's position through
   the written solo part, allowing extreme rubato and pauses beyond the global
   tempo tolerance.

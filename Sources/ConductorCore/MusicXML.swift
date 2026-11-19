@@ -65,6 +65,7 @@ public struct MusicXMLScore: Sendable {
     public let ornamentAttacks: [MIDINote]
     public let staves: [MusicXMLStaff]
     public let writtenTempoQuarters: Set<Double>
+    public let cadenzaDirectionQuarters: Set<Double>
     public let tempoDirectionQuarters: Set<Double>
     public let measures: [MusicXMLMeasure]
     public var endQuarter: Double { measures.last?.endQuarter ?? 0 }
@@ -91,6 +92,7 @@ public struct MusicXMLScore: Sendable {
             throw MusicXMLReadError.unsupportedCue(.unestablishedPlayback("Duplicate part IDs."))
         }
         var writtenTempos = Set<Double>()
+        var cadenzaDirections = Set<Double>()
         var tempoDirections = Set<Double>()
         var parsedStaves: [MusicXMLStaff] = []
         var ornaments: [MIDINote] = []
@@ -164,6 +166,10 @@ public struct MusicXMLScore: Sendable {
                             writtenTempos.insert(q)
                         }
                         let words = types.filter { $0.name == "words" }.map(\.text).joined(separator: " ").lowercased()
+                        if let firstWord = words.split(whereSeparator: { !$0.isLetter }).first,
+                           firstWord == "cadenza" || firstWord == "kadenz" {
+                            cadenzaDirections.insert(q)
+                        }
                         // MusicXML may encode a MuseScore tempo spanner as plain
                         // words, with or without a dashed line. Correlate these
                         // directions with the exported tempo events in MIDI.
@@ -308,6 +314,7 @@ public struct MusicXMLScore: Sendable {
         }
         staves = parsedStaves
         writtenTempoQuarters = writtenTempos
+        cadenzaDirectionQuarters = cadenzaDirections
         tempoDirectionQuarters = tempoDirections
         ornamentAttacks = ornaments
         measures = parsedMeasures

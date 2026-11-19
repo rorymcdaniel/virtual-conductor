@@ -13,10 +13,12 @@ public struct FollowingPlan: Sendable {
     public let notes: [MIDINote]
     public let waits: [Double]
     public let freePassages: [PassageRange]
+    public let writtenCadenzas: [PassageRange]
     public let cadenzas: [CompiledCadenza]
     public let end: Double
 
-    public init(score: MusicXMLScore, solo: MusicXMLStaffID, waits: [WaitPoint], freePassages requested: [PassageRange] = [], cadenzas: [CompiledCadenza]) throws {
+    public init(score: MusicXMLScore, solo: MusicXMLStaffID, waits: [WaitPoint], freePassages requested: [PassageRange] = [], cadenzas: [CompiledCadenza],
+                followWrittenCadenzas: Bool = false) throws {
         guard let staff = score.staves.first(where: { $0.id == solo }), !staff.notes.isEmpty else {
             throw MusicalError("Choose a MusicXML solo staff with pitched notes.")
         }
@@ -34,7 +36,6 @@ public struct FollowingPlan: Sendable {
             }
         }
         self.waits = Array(Set(waits.map(\.quarter))).sorted()
-        self.cadenzas = cadenzas
         end = score.endQuarter
         var gaps = requested.sorted { $0.start < $1.start }
         let accompaniment = score.staves.filter { $0.id != solo }.flatMap(\.soundingIntervals)
@@ -52,7 +53,23 @@ public struct FollowingPlan: Sendable {
                 throw MusicalError("Choose a solo passage where the orchestra rests. The return may be its next entrance.")
             }
         }
-        for cadenza in cadenzas {
+        let inferred = followWrittenCadenzas ? Self.writtenRanges(notes: notes, accompaniment: accompaniment, marks: score.cadenzaDirectionQuarters) : []
+        func overlaps(_ pedal: CompiledCadenza, _ range: PassageRange) -> Bool {
+            pedal.startQuarter < range.end && pedal.returnQuarter > range.start
+        }
+        let automatic = inferred.filter { range in
+            guard !requested.contains(where: { $0.start < range.end && $0.end > range.start }) else { return false }
+            // A saved stop for this same return can be followed automatically.
+            // A different pedal instruction in the passage keeps manual control.
+            return cadenzas.filter { overlaps($0, range) }.allSatisfy {
+                $0.startQuarter >= range.start - 1e-7 && abs($0.returnQuarter - range.end) < 1e-7
+            }
+        }
+        writtenCadenzas = automatic
+        self.cadenzas = cadenzas.filter { pedal in !automatic.contains { overlaps(pedal, $0) } }
+        gaps += writtenCadenzas
+        gaps.sort { $0.start < $1.start }
+        for cadenza in self.cadenzas {
             gaps = gaps.flatMap { gap -> [PassageRange] in
                 guard cadenza.startQuarter < gap.end, cadenza.returnQuarter > gap.start else { return [gap] }
                 return [PassageRange(start: gap.start, end: min(gap.end, cadenza.startQuarter)),
@@ -63,6 +80,31 @@ public struct FollowingPlan: Sendable {
         freePassages = gaps.filter { gap in
             staff.notes.contains { $0.startQuarter >= gap.start && $0.startQuarter < gap.end }
         }
+    }
+
+    /// Infer an unlabelled cadenza from a sustained orchestral rest containing
+    /// a written phrase. A later sounding interval supplies the exact re-entry.
+    private static func writtenRanges(notes: [MIDINote], accompaniment: [MusicXMLSoundingInterval],
+                                      marks: Set<Double>) -> [PassageRange] {
+        var ranges: [PassageRange] = []
+        var release = 0.0
+        var firstNote = notes.startIndex
+        for entrance in accompaniment.sorted(by: { $0.startQuarter < $1.startQuarter }) {
+            defer { release = max(release, entrance.endQuarter) }
+            let gap = entrance.startQuarter - release
+            guard gap > 1e-7 else { continue }
+            let mark = marks.filter { $0 >= release - 1e-7 && $0 < entrance.startQuarter - 1e-7 }.min()
+            let firstBarline = ceil((release - 1e-7) / 4) * 4
+            if mark != nil || entrance.startQuarter >= firstBarline + 8 - 1e-7 {
+                let start = max(mark ?? release, release)
+                while firstNote < notes.count && notes[firstNote].startQuarter < start - 1e-7 { firstNote += 1 }
+                let confirmingNote = mark == nil ? firstNote + 2 : firstNote
+                if confirmingNote < notes.count && notes[confirmingNote].startQuarter < entrance.startQuarter - 1e-7 {
+                    ranges.append(PassageRange(start: start, end: entrance.startQuarter))
+                }
+            }
+        }
+        return ranges
     }
 }
 

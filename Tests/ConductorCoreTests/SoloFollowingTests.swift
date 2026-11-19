@@ -108,6 +108,49 @@ final class SoloFollowingTests: XCTestCase {
         XCTAssertEqual(tracker.index, 7)
         XCTAssertEqual(tracker.rate, pace, accuracy: 0.04)
     }
+    func testShortMarkedCadenzaUsesTheLastSoundingStaffsFractionalRelease() throws {
+        let header = "<attributes><divisions>2</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>"
+        let soloNote = "<note><pitch><step>C</step><octave>5</octave></pitch><duration>2</duration></note>"
+        let chord = "<note><pitch><step>C</step><octave>3</octave></pitch><duration>1</duration></note>"
+        let score = """
+        <score-partwise><part id="S"><measure number="1">\(header)\(String(repeating: soloNote, count: 4))</measure></part>
+        <part id="O"><measure number="1">\(header)\(chord)<direction><direction-type><words>Cadenza</words></direction-type></direction>
+        <note><rest/><duration>6</duration></note>\(chord)</measure></part></score-partwise>
+        """
+        func detected(_ xml: String) throws -> [PassageRange] {
+            try FollowingPlan(score: MusicXMLScore(data: Data(xml.utf8)), solo: FollowingFixture.solo,
+                              waits: [], cadenzas: [], followWrittenCadenzas: true).writtenCadenzas
+        }
+        XCTAssertEqual(try detected(score), [PassageRange(start: 0.5, end: 3.5)])
+        XCTAssertTrue(try detected(score.replacingOccurrences(of: "Cadenza", with: "dolce")).isEmpty)
+    }
+
+    func testWrittenCadenzaFollowsTheScoreWithSavedPedalBoundaries() throws {
+        let score = try FollowingFixture.score()
+        let midi = try FollowingFixture.midi()
+        let saved = try compileCadenzas([CadenzaPassage(startMeasure: 1, startBeat: 2, returnMeasure: 3, returnBeat: 1)],
+                                        midi: midi, audioDuration: 8)
+        let plan = try FollowingPlan(score: score, solo: FollowingFixture.solo, waits: [], cadenzas: saved,
+                                     followWrittenCadenzas: true)
+        XCTAssertEqual(plan.freePassages, [PassageRange(start: 0, end: 8)])
+        XCTAssertTrue(plan.cadenzas.isEmpty)
+        let manual = try FollowingPlan(score: score, solo: FollowingFixture.solo, waits: [], cadenzas: saved,
+                                       followWrittenCadenzas: false)
+        XCTAssertEqual(manual.cadenzas, saved)
+        XCTAssertTrue(manual.freePassages.isEmpty)
+    }
+
+    func testCustomPedalStopsInsideAnInferredPassageAreKeptTogether() throws {
+        let saved = try compileCadenzas([
+            CadenzaPassage(startMeasure: 1, startBeat: 1.5, returnMeasure: 1, returnBeat: 2),
+            CadenzaPassage(startMeasure: 2, startBeat: 1, returnMeasure: 3, returnBeat: 1)
+        ], midi: FollowingFixture.midi(), audioDuration: 8)
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [],
+                                     cadenzas: saved, followWrittenCadenzas: true)
+        XCTAssertTrue(plan.writtenCadenzas.isEmpty)
+        XCTAssertEqual(plan.cadenzas, saved)
+    }
+
     func testUnmarkedSoloSilenceUsesBoundedFollowing() throws {
         let score = try FollowingFixture.score(transpose: -7)
         let plan = try FollowingPlan(score: score, solo: FollowingFixture.solo, waits: [WaitPoint(measure: 1, beat: 2)], cadenzas: [])
@@ -117,16 +160,20 @@ final class SoloFollowingTests: XCTestCase {
         XCTAssertThrowsError(try FollowingPlan(score: score, solo: FollowingFixture.solo, waits: [WaitPoint(measure: 1, beat: 1.5)], cadenzas: []))
         XCTAssertThrowsError(try FollowingPlan(score: score, solo: FollowingFixture.solo, waits: [WaitPoint(measure: 0, beat: 1)], cadenzas: []))
     }
-    func testOldSettingsPreserveWaitsAndRequireOptInForFreeFollowing() throws {
+    func testOldSettingsEnableWrittenCadenzasAndRememberThePedalChoice() throws {
         let data = Data(#"{"enabled":true,"waits":[{"measure":2,"beat":1}]}"#.utf8)
         var config = try JSONDecoder().decode(FollowingConfiguration.self, from: data)
         XCTAssertTrue(config.enabled)
+        XCTAssertTrue(config.followWrittenCadenzas)
+        config.followWrittenCadenzas = false
         XCTAssertEqual(config.waits, [WaitPoint(measure: 2, beat: 1)])
         XCTAssertTrue(config.freePassages.isEmpty)
         let range = PassageRange(start: 1.5, end: 4)
         config.freePassages = [range]
         let saved = try JSONEncoder().encode(config)
-        XCTAssertEqual(try JSONDecoder().decode(FollowingConfiguration.self, from: saved).freePassages, [range])
+        let restored = try JSONDecoder().decode(FollowingConfiguration.self, from: saved)
+        XCTAssertFalse(restored.followWrittenCadenzas)
+        XCTAssertEqual(restored.freePassages, [range])
         let score = try FollowingFixture.score()
         func plan(_ ranges: [PassageRange]) throws -> FollowingPlan {
             try FollowingPlan(score: score, solo: FollowingFixture.solo, waits: [], freePassages: ranges, cadenzas: [])

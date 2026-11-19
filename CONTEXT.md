@@ -18,6 +18,12 @@ The allowed percentage deviation of accompaniment tempo from the planned tempo
 at the current musical location while following the soloist.
 
 **Free following**:
-Tracking the soloist's position through the written solo part during a performer-configured
+Tracking the soloist's position through the written solo part during an
 unaccompanied passage, allowing extreme rubato and pauses without the global
 tempo tolerance.
+
+**Written cadenza**:
+An unaccompanied passage with a notated solo line the conductor can follow to the orchestral return.
+
+**Pedal passage**:
+A performer-defined cadenza with a start and return beat. The performer cues the orchestral return with the pedal.

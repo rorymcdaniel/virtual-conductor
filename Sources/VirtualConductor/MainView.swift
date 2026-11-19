@@ -181,7 +181,7 @@ struct MainView: View {
                 Button("Reread exports", action: model.reload)
                     .disabled(model.midiURL == nil || model.wavURL == nil || [.loading, .starting].contains(model.state))
                 Spacer()
-                Button("Cadenza passages…") { model.editorOpen = true }.disabled(!editable)
+                Button("Pedal passages…") { model.editorOpen = true }.disabled(!editable)
                 Button("Import browser settings…", action: model.importSettings).disabled(!editable)
                 Button("Record interpretation…", action: model.openRecording)
                     .disabled(model.prepared == nil || [.loading, .starting].contains(model.state))
@@ -200,7 +200,7 @@ struct MainView: View {
                 Text(model.message).font(.caption).foregroundStyle(model.outputMissing || model.state == .error ? Color.orange : Color.secondary)
                     .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 if !model.passages.isEmpty {
-                    Text("\(model.passages.count) cadenza \(model.passages.count == 1 ? "passage" : "passages")")
+                    Text("\(model.passages.count) saved pedal \(model.passages.count == 1 ? "passage" : "passages")")
                         .font(.caption).foregroundStyle(accent).fixedSize()
                 }
             }.frame(minHeight: 25, alignment: .top)
@@ -306,12 +306,12 @@ private struct CadenzaEditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Cadenza passages").font(.title2.weight(.semibold))
-            Text("Enter free time at the start beat and let the orchestra’s release fade. Press ArrowRight to resume at the return beat, with no count-in. Measures begin at 1; beats run from 1 to 4, with decimals for subdivisions (1.5 = halfway through beat 1).")
+            Text("Pedal passages").font(.title2.weight(.semibold))
+            Text("For an improvised cadenza, enter the start and return here. In Live following, choose Use pedal passages. Press Right Arrow at the orchestral entrance. Fractional beats are supported, such as 1.5.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    if draft.isEmpty { Text("No passages. Saving this list removes all cadenza stops.").foregroundStyle(.secondary).padding(.vertical, 16) }
+                    if draft.isEmpty { Text("No pedal passages.").foregroundStyle(.secondary).padding(.vertical, 16) }
                     ForEach($draft) { $row in
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 6) {
