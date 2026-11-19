@@ -208,6 +208,48 @@ final class SoloFollowingTests: XCTestCase {
         XCTAssertEqual(stream.drain()?.followsGap, false)
     }
 
+    func testFourSteadyAttacksEstablishTheQuickerPulseAfterAnUnevenEntrance() throws {
+        let midi = try FollowingFixture.midi()
+        let onsets = [0.0, 0.33, 0.67, 1.0, 1.33, 1.80, 2.05, 2.30, 2.55]
+        let notes = onsets.indices.map { index in
+            MIDINote(pitch: 60 + index, startQuarter: Double(index) / 2, endQuarter: Double(index + 1) / 2)
+        }
+        var tracker = SoloTracker()
+        for (index, onset) in onsets.enumerated() {
+            let note = notes[index]
+            for frame in 0..<2 {
+                _ = tracker.observe(pitch: note.pitch, time: onset + Double(frame) * 0.01,
+                                    notes: notes, expectedQuarter: note.startQuarter, free: false, midi: midi)
+            }
+            if index == 4 { XCTAssertEqual(tracker.rate, 0.75, accuracy: 0.02) }
+        }
+        XCTAssertTrue(tracker.hasReliableTempo)
+        XCTAssertEqual(tracker.rate, 1, accuracy: 0.02)
+    }
+
+    func testRecognizingTheSameWrittenNoteAgainPreservesItsOnset() throws {
+        let notes = [60, 62, 64, 64].enumerated().map { index, pitch in
+            MIDINote(pitch: pitch, startQuarter: Double(index), endQuarter: Double(index + 1))
+        }
+        let midi = try FollowingFixture.midi()
+        var tracker = SoloTracker()
+        func frames(_ pitch: Int?, at time: Double, quarter: Double) -> Int? {
+            _ = tracker.observe(pitch: pitch, time: time, notes: notes, expectedQuarter: quarter, free: false, midi: midi)
+            return tracker.observe(pitch: pitch, time: time + 0.01, notes: notes, expectedQuarter: quarter, free: false, midi: midi)
+        }
+        XCTAssertEqual(frames(60, at: 0, quarter: 0), 0)
+        XCTAssertEqual(frames(62, at: 0.5, quarter: 1), 1)
+        let onset = tracker.lastAttack
+        _ = frames(nil, at: 0.60, quarter: 1.2)
+        XCTAssertNil(frames(62, at: 0.65, quarter: 1.3))
+        XCTAssertEqual(tracker.lastAttack, onset)
+        XCTAssertEqual(tracker.lastMatch, 0.66, accuracy: 0.001)
+        XCTAssertEqual(frames(64, at: 1, quarter: 2), 2)
+        XCTAssertTrue(tracker.hasReliableTempo)
+        _ = frames(nil, at: 1.45, quarter: 2.9)
+        XCTAssertEqual(frames(64, at: 1.5, quarter: 3), 3)
+    }
+
     func testRepeatedPitchNeedsArticulationAndOrdinaryDynamicsDoNotInventAttacks() throws {
         let notes = [MIDINote(pitch: 60, startQuarter: 0, endQuarter: 1), MIDINote(pitch: 60, startQuarter: 1, endQuarter: 2)]
         let midi = try FollowingFixture.midi()

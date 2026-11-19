@@ -111,3 +111,29 @@ Following status. Separate checks cover gaps inside and between batches, stale
 input at a wait, and queue overflow. The banner keeps a recent pitch match mint
 while showing Holding tempo, and turns yellow as the app listens for a missing
 match. A new horn rehearsal is still needed to measure the effect across the page.
+
+## Picking up a quicker pulse after measure seven
+
+Two afternoon rehearsals on November 18 captured the accompaniment holding a
+slow pace after the horn's attacks had sped up. In measures 25–26, recognizing
+the same written note twice discarded the earlier attacks used to estimate
+tempo. In measure 29, an uneven earlier attack outweighed four more recent
+attacks that established a quicker pace.
+
+The accompanied follower now keeps a note's original onset when it recognizes
+that same note again. If the full phrase gives an inconsistent tempo estimate,
+the follower checks the four latest consecutive attacks with the same timing and
+minimum-duration requirements. A written repeated note still supplies a new
+attack. An isolated breath still leaves the established pulse in place.
+
+At the end of the two affected excerpts, continuous replay at the saved ±30%
+tolerance showed the following commanded rates, relative to the written tempo.
+
+| Excerpt | Previous follower | Updated follower |
+| --- | --- | --- |
+| Measures 25–26 | 78–89% | 93–94% |
+| Measure 29 into 30 | 75% | 91–93% |
+
+Both opening-phrase replays and the earlier steady-horn and half-note regression
+cases passed. These excerpts contain detected pitches and attack times. The
+effect across a complete live performance still needs a rehearsal.

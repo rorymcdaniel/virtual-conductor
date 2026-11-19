@@ -196,6 +196,12 @@ public struct SoloTracker: Codable, Sendable {
             if !free { tempoConfirmed = false; pendingTempoRate = nil }
             return nil
         }
+        // Reacquiring the same written note after a gap refreshes position
+        // confidence. Its original onset still belongs to this phrase.
+        if !free, match == index {
+            lastMatch = time; releasedAt = nil
+            return nil
+        }
         // Position recovery is useful without being evidence of faster playing.
         // Start a new phrase after a skipped or backwards match; retain its last
         // trusted pace until subsequent attacks corroborate the new position.
@@ -206,31 +212,18 @@ public struct SoloTracker: Codable, Sendable {
         while anchors.count > (free ? 1 : 2) && onset - anchors[1].hostTime >= 1.2 { anchors.removeFirst() }
         anchors.append(Anchor(scoreTime: scoreTime, hostTime: onset))
         if onset - anchors[0].hostTime > 0.08 {
-            // Fit all the attacks so one late triplet does not set the pace
-            // throughout the long note or written rest that follows it.
-            let count = Double(anchors.count)
-            let meanHost = anchors.reduce(0) { $0 + ($1.hostTime - onset) } / count
-            let meanScore = anchors.reduce(0) { $0 + ($1.scoreTime - scoreTime) } / count
-            var covariance = 0.0, variance = 0.0
-            for anchor in anchors {
-                let dt = (anchor.hostTime - onset) - meanHost
-                covariance += dt * ((anchor.scoreTime - scoreTime) - meanScore)
-                variance += dt * dt
-            }
-            let fitted = covariance / variance
-            let coherent = anchors.allSatisfy {
-                abs(($0.hostTime - onset) * fitted - ($0.scoreTime - scoreTime)) <= 0.10
-            } && zip(anchors, anchors.dropFirst()).allSatisfy { previous, current in
-                let predicted = (current.scoreTime - previous.scoreTime) / fitted
-                let observed = current.hostTime - previous.hostTime
-                // A plausible average is insufficient when individual intervals
-                // alternate between rushed and delayed, as false recovery can.
-                return predicted > 0 && abs(observed - predicted) <= max(0.04, predicted * 0.25)
-            }
-            if free { rate = min(4, max(0.1, fitted)) }
+            let fit = Self.phraseFit(anchors[...])
+            if free { rate = min(4, max(0.1, fit.rate)) }
             else {
-                let consistent = anchors.count >= 3 && onset - anchors[0].hostTime >= 0.6 &&
-                    fitted.isFinite && (0.1...4).contains(fitted) && coherent
+                // An uneven entrance can stay in the fitting window after the player
+                // has already established a new pulse. Four consecutive attacks can
+                // confirm that pulse on their own, using the same timing checks.
+                var phrase = fit
+                if !phrase.consistent, anchors.count > 4 {
+                    phrase = Self.phraseFit(anchors.suffix(4))
+                }
+                let fitted = phrase.rate
+                let consistent = phrase.consistent
                 // Keep small expressive changes responsive. Two intervals alone
                 // cannot replace the established pulse with a markedly different
                 // pace that would then persist through a long note or solo rest.
@@ -246,6 +239,30 @@ public struct SoloTracker: Codable, Sendable {
         }
         index = match; lastMatch = time; lastAttack = onset; releasedAt = nil
         return match
+    }
+
+    private static func phraseFit(_ phrase: ArraySlice<Anchor>) -> (rate: Double, consistent: Bool) {
+        guard let first = phrase.first, let last = phrase.last else { return (1, false) }
+        let count = Double(phrase.count)
+        let meanHost = phrase.reduce(0) { $0 + ($1.hostTime - last.hostTime) } / count
+        let meanScore = phrase.reduce(0) { $0 + ($1.scoreTime - last.scoreTime) } / count
+        var covariance = 0.0, variance = 0.0
+        for anchor in phrase {
+            let dt = (anchor.hostTime - last.hostTime) - meanHost
+            covariance += dt * ((anchor.scoreTime - last.scoreTime) - meanScore)
+            variance += dt * dt
+        }
+        let fitted = covariance / variance
+        guard phrase.count >= 3, last.hostTime - first.hostTime >= 0.6,
+              fitted.isFinite, (0.1...4).contains(fitted) else { return (fitted, false) }
+        let coherent = phrase.allSatisfy {
+            abs(($0.hostTime - last.hostTime) * fitted - ($0.scoreTime - last.scoreTime)) <= 0.10
+        } && zip(phrase, phrase.dropFirst()).allSatisfy { previous, current in
+            let predicted = (current.scoreTime - previous.scoreTime) / fitted
+            let observed = current.hostTime - previous.hostTime
+            return predicted > 0 && abs(observed - predicted) <= max(0.04, predicted * 0.25)
+        }
+        return (fitted, coherent)
     }
 }
 
