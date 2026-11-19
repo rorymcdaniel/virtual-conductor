@@ -8,6 +8,7 @@ struct MainView: View {
     @ObservedObject var model: PerformanceModel
     @State private var museScoreOpen = false
     @State private var startMeasureText = "1"
+    @State private var measureError = ""
     @FocusState private var startMeasureFocused: Bool
     private let accent = Color(red: 0.63, green: 0.90, blue: 0.83)
     private var editable: Bool { model.prepared != nil && [.ready, .paused, .waiting, .finished, .interrupted].contains(model.state) }
@@ -17,7 +18,7 @@ struct MainView: View {
         case .running: return "Pause"
         case .paused: return "Resume"
         case .finished: return "Play again"
-        case .waiting: return "Awaiting pedal"
+        case .waiting: return "Cue return"
         case .starting: return "Starting…"
         default: return "Start"
         }
@@ -40,22 +41,20 @@ struct MainView: View {
     var body: some View {
         VStack(spacing: 0) {
             if !model.clean { header }
-            ZStack(alignment: .bottomTrailing) {
-                VStack(spacing: 0) {
-                    FollowingBanner(following: model.following)
-                    ConductorSurface(model: model).frame(minHeight: 240)
+            FollowingBanner(following: model.following)
+            ConductorSurface(model: model).frame(maxWidth: .infinity, maxHeight: .infinity).frame(minHeight: 240)
+            if model.clean {
+                HStack(spacing: 12) {
+                    transportButtons
+                    Divider().frame(height: 22)
+                    measureControls
+                    if !measureError.isEmpty { Text(measureError).font(.caption).foregroundStyle(.orange) }
+                    Spacer()
+                    Button("Show controls") { model.clean = false }.help("Show setup controls · H")
                 }
-                if model.clean {
-                    Button { model.clean = false } label: {
-                        Text("H · Show controls").font(.caption).foregroundStyle(.white.opacity(0.50))
-                            .padding(.horizontal, 14).padding(.vertical, 9)
-                            .background(.black.opacity(0.25), in: Capsule())
-                    }.buttonStyle(.plain).padding(20).help("Show setup controls")
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .frame(minHeight: 240)
-            if !model.clean { controls }
+                .disabled(model.shortcutsBlocked)
+                .padding(.horizontal, 24).padding(.vertical, 12)
+            } else { controls }
         }
         .background(Color(red: 0.035, green: 0.055, blue: 0.065))
         .preferredColorScheme(.dark)
@@ -100,16 +99,31 @@ struct MainView: View {
         .padding(.horizontal, 28).padding(.top, 20).padding(.bottom, 16)
     }
 
+    @ViewBuilder private var transportButtons: some View {
+        Button(action: model.state == .waiting ? model.cue : model.toggle) {
+            Label(playTitle, systemImage: model.state == .running ? "pause.fill" : "play.fill")
+                .frame(minWidth: 94).padding(.vertical, 4)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(model.prepared == nil || model.outputMissing || ![.ready, .running, .paused, .waiting, .finished].contains(model.state))
+        Button("Reset", action: model.reset).disabled(model.prepared == nil || [.loading, .starting].contains(model.state))
+    }
+
+    @ViewBuilder private var measureControls: some View {
+        Text("Start at measure")
+        TextField("Measure", text: $startMeasureText)
+            .frame(width: 64).textFieldStyle(.roundedBorder).monospacedDigit()
+            .accessibilityLabel("Start at measure").focused($startMeasureFocused)
+            .onChange(of: startMeasureText) { measureError = "" }
+            .onSubmit(applyStartMeasure).disabled(!editable)
+        Button("Go", action: applyStartMeasure).disabled(!editable)
+            .help("Prepare a fresh start at this measure")
+    }
+
     private var controls: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
-                Button(action: model.toggle) {
-                    Label(playTitle, systemImage: model.state == .running ? "pause.fill" : "play.fill")
-                        .frame(minWidth: 94).padding(.vertical, 4)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.prepared == nil || model.outputMissing || ![.ready, .running, .paused, .finished].contains(model.state))
-                Button("Reset", action: model.reset).disabled(model.prepared == nil || [.loading, .starting].contains(model.state))
+                transportButtons
                 Spacer()
                 Toggle("Clicks", isOn: $model.clicks).toggleStyle(.checkbox)
                 Toggle("Guide", isOn: $model.guide).toggleStyle(.checkbox)
@@ -117,13 +131,7 @@ struct MainView: View {
                 Slider(value: $model.volume, in: 0...1).frame(width: 110).accessibilityLabel("Playback volume")
             }
             HStack(spacing: 10) {
-                Text("Start at measure")
-                TextField("Measure", text: $startMeasureText)
-                    .frame(width: 64).textFieldStyle(.roundedBorder).monospacedDigit()
-                    .accessibilityLabel("Start at measure").focused($startMeasureFocused)
-                    .onSubmit(applyStartMeasure).disabled(!editable)
-                Button("Go", action: applyStartMeasure).disabled(!editable)
-                    .help("Prepare a fresh start at this measure")
+                measureControls
                 Button("Practice tempo…") { model.tempoOpen = true }.disabled(!editable)
                 Divider().frame(height: 22)
                 Stepper(value: $model.preparation, in: 0...99) {
@@ -212,7 +220,11 @@ struct MainView: View {
     }
 
     private func applyStartMeasure() {
-        if model.chooseStartMeasure(startMeasureText) { startMeasureFocused = false }
+        if model.chooseStartMeasure(startMeasureText) {
+            measureError = ""; startMeasureFocused = false
+        } else {
+            measureError = model.message
+        }
     }
 }
 
