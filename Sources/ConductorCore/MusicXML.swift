@@ -60,6 +60,7 @@ public enum MusicXMLReadError: Error, Equatable, LocalizedError, Sendable {
 }
 
 public struct MusicXMLScore: Sendable {
+    public let caesuraQuarters: Set<Double>
     /// Additional MIDI attacks MuseScore may render for ornaments, in concert pitch.
     /// These ranges are for export validation, not entrances on the written beat grid.
     public let ornamentAttacks: [MIDINote]
@@ -95,6 +96,7 @@ public struct MusicXMLScore: Sendable {
         var cadenzaDirections = Set<Double>()
         var tempoDirections = Set<Double>()
         var parsedStaves: [MusicXMLStaff] = []
+        var caesuras = Set<Double>()
         var ornaments: [MIDINote] = []
         // Allow up to an eighth note of displacement around an ordinary grace group.
         let graceAllowance = 0.5
@@ -215,6 +217,9 @@ public struct MusicXMLScore: Sendable {
                             onset = cursor
                         }
                         if element.name == "note" {
+                            if element.child("notations")?.child("articulations")?.child("caesura") != nil {
+                                caesuras.insert(start + onset + length)
+                            }
                             if element.child("rest") == nil, element.child("cue") == nil {
                                 if element.child("notations")?.child("ornaments")?.child("tremolo")?.attributes["type"] == "single" {
                                     tremoloOnsets[staff, default: []].insert(start + onset)
@@ -316,6 +321,7 @@ public struct MusicXMLScore: Sendable {
         writtenTempoQuarters = writtenTempos
         cadenzaDirectionQuarters = cadenzaDirections
         tempoDirectionQuarters = tempoDirections
+        caesuraQuarters = caesuras
         ornamentAttacks = ornaments
         measures = parsedMeasures
     }

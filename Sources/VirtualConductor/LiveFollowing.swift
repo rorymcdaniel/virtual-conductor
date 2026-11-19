@@ -240,6 +240,12 @@ extension InputCapture: FollowingInput {}
                 guard position >= prepared.timing.prepSeconds else { audio.setRate(baseRate); return }
                 let planned = prepared.practice.planned
                 let q = quarter(position)
+                if prepared.timing.scoreTime(performanceSeconds: position) - prepared.midi.seconds(atQuarter: q) > 1e-6 {
+                    writtenRest = true
+                    audio.setRate(baseRate * tempo.rate)
+                    status = .following; detail = "Caesura · waiting through the recorded pause"
+                    return
+                }
                 let expectingSound = plan.notes.contains { $0.startQuarter <= q && q < $0.endQuarter }
                 writtenRest = !expectingSound
                 let age = now - tracker.lastMatch

@@ -15,7 +15,7 @@ final class LongRestSetupTests: XCTestCase {
     private func fixture(_ name: String) -> URL {
         Bundle.module.url(forResource: name, withExtension: "musicxml", subdirectory: "Fixtures")!
     }
-    private func midiData(attacks: [Double], end: Double, tempo: Int = 500_000, noteTicks: Int = 1, pitches: [UInt8]? = nil) -> Data {
+    private func midiData(attacks: [Double], end: Double, tempo: Int = 500_000, noteTicks: Int = 1, pitches: [UInt8]? = nil, tempoEvents: [Double] = []) -> Data {
         func integer(_ value: Int, _ count: Int) -> [UInt8] {
             (0..<count).reversed().map { UInt8((value >> ($0 * 8)) & 255) }
         }
@@ -31,6 +31,7 @@ final class LongRestSetupTests: XCTestCase {
             let pitch = pitches?[index] ?? UInt8(24 + index % 80), tick = Int((attack * 480).rounded())
             events.append((tick,[144,pitch,80])); events.append((tick + noteTicks,[128,pitch,0]))
         }
+        for q in tempoEvents { events.append((Int(q * 480), [255,81,3] + integer(tempo,3))) }
         var tick = 0
         for event in events.sorted(by: { $0.0 < $1.0 }) {
             track += vlq(event.0 - tick) + event.1; tick = event.0
@@ -38,6 +39,38 @@ final class LongRestSetupTests: XCTestCase {
         track += vlq(Int(end * 480) - tick) + [255,47,0]
         return Data(Array("MThd".utf8) + integer(6,4) + [0,0,0,1,1,224] + Array("MTrk".utf8) + integer(track.count,4) + track)
     }
+    func testRenderedCaesuraKeepsTheWrittenAttackAtItsWAVTime() throws {
+        let xml = """
+        <score-partwise><part id="P1"><measure number="1">
+        <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+        <note><pitch><step>C</step><octave>4</octave></pitch><duration>3</duration>
+        <notations><articulations><caesura/></articulations></notations></note>
+        <note><pitch><step>D</step><octave>4</octave></pitch><duration>1</duration></note>
+        </measure></part></score-partwise>
+        """
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        try Data(xml.utf8).write(to: file)
+        let raw = try MIDIFile(data: midiData(attacks: [0, 7], end: 8, tempoEvents: [3, 7]))
+        let loaded = ScorePreparation.Loaded(musicXML: file, identity: nil, midi: raw, midiFingerprint: "fixture")
+        XCTAssertNil(loaded.unavailable)
+        let mapped = loaded.midi
+        XCTAssertEqual(mapped.endQuarter, 4)
+        XCTAssertEqual(mapped.duration, raw.duration)
+        XCTAssertEqual(mapped.tracks[0].noteEvents.map(\.startQuarter), [0, 3])
+        XCTAssertEqual(mapped.seconds(atQuarter: 3), raw.seconds(atQuarter: 7))
+        XCTAssertLessThan(mapped.quarter(atSeconds: 3.49), 3)
+        XCTAssertEqual(mapped.quarter(atSeconds: 2), 3, accuracy: 1e-9)
+        let timing = try PerformanceTiming(midi: mapped, preparatoryMeasures: 0)
+        XCTAssertEqual(timing.position(timing.performanceTime(scoreSeconds: 2)).beat, 2)
+        XCTAssertEqual(timing.position(timing.performanceTime(scoreSeconds: 3.5)).beat, 3)
+        let slower = try mapped.applyingTempoMarks([PracticeTempoMark(quarter: 0, bpm: 60)], boundaries: [0])
+        XCTAssertEqual(slower.seconds(atQuarter: 3), 7)
+
+        let wrong = try MIDIFile(data: midiData(attacks: [0, 5, 7], end: 8, tempoEvents: [3, 7]))
+        XCTAssertNotNil(ScorePreparation.Loaded(musicXML: file, identity: nil, midi: wrong, midiFingerprint: "other").unavailable)
+    }
+
     private func loaded(_ name: String = "long-rest-eight-measures", identity: URL = URL(fileURLWithPath: "/score.mscz"), kept: Bool = false) throws -> ScorePreparation.Loaded {
         let url = fixture(name), score = try MusicXMLScore(data: Data(contentsOf: url))
         let midi = try MIDIFile(data: midiData(attacks: score.staves.flatMap(\.soundingIntervals).map(\.startQuarter), end: score.endQuarter))

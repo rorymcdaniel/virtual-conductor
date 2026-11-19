@@ -143,21 +143,29 @@ public struct MIDIFile: Codable, Sendable {
         guard endQuarter > 0 else { throw MusicalError("The MIDI file has no musical duration.") }
     }
 
-    private func segment(at value: Double, key: KeyPath<TempoSegment, Double>) -> TempoSegment {
+    private func segmentIndex(at value: Double, key: KeyPath<TempoSegment, Double>) -> Int {
         var low = 0, high = segments.count
         while low + 1 < high {
             let middle = (low + high) / 2
             if segments[middle][keyPath: key] <= value { low = middle } else { high = middle }
         }
-        return segments[low]
+        return low
+    }
+    private func segment(at value: Double, key: KeyPath<TempoSegment, Double>) -> TempoSegment {
+        segments[segmentIndex(at: value, key: key)]
     }
     public func seconds(atQuarter quarter: Double) -> Double {
         let s = segment(at: quarter, key: \.quarter)
         return s.seconds + (quarter - s.quarter) * s.secondsPerQuarter
     }
     public func quarter(atSeconds seconds: Double) -> Double {
-        let s = segment(at: seconds, key: \.seconds)
-        return s.quarter + (seconds - s.seconds) / s.secondsPerQuarter
+        let index = segmentIndex(at: seconds, key: \.seconds)
+        let s = segments[index]
+        let extrapolated = s.quarter + (seconds - s.seconds) / s.secondsPerQuarter
+        // The next attack can be delayed by a rendered caesura. Hold the
+        // conducting position on its approach until that attack's source time.
+        guard index + 1 < segments.count else { return extrapolated }
+        return min(extrapolated, segments[index + 1].quarter.nextDown)
     }
     public func tempo(atQuarter quarter: Double) -> Double { 60 / segment(at: quarter, key: \.quarter).secondsPerQuarter }
     public func tempo(atSeconds seconds: Double) -> Double { 60 / segment(at: seconds, key: \.seconds).secondsPerQuarter }
@@ -204,6 +212,37 @@ private struct MIDIReader {
 
 /// Merge local quarter-note BPM markings into the exported tempo events.
 public extension MIDIFile {
+    /// MuseScore encodes a caesura as one inserted 4/4 bar with its own
+    /// tempo. Remove those playback beats while retaining absolute WAV times.
+    func mappingCaesuras(at writtenEnds: Set<Double>) -> MIDIFile? {
+        guard !writtenEnds.isEmpty else { return nil }
+        let tempoTicks = Set(segments.map(\.quarter))
+        let attacks = tracks.flatMap(\.noteEvents).map(\.startQuarter)
+        var pauses: [Range<Double>] = []
+        for q in writtenEnds.sorted() {
+            let start = (q * Double(ppqn)).rounded() / Double(ppqn) + Double(pauses.count * 4)
+            let gap = start..<(start + 4)
+            if start > 0, tempoTicks.contains(start), tempoTicks.contains(gap.upperBound),
+               !attacks.contains(where: gap.contains) {
+                pauses.append(gap)
+            }
+        }
+        guard !pauses.isEmpty else { return nil }
+        func written(_ q: Double) -> Double {
+            q - pauses.reduce(0) { $0 + max(0, min(4, q - $1.lowerBound)) }
+        }
+        let timeline = segments.compactMap { segment -> TempoSegment? in
+            guard !pauses.contains(where: { $0.contains(segment.quarter) }) else { return nil }
+            return TempoSegment(quarter: written(segment.quarter), seconds: segment.seconds, secondsPerQuarter: segment.secondsPerQuarter)
+        }
+        let mapped = tracks.map { track in
+            MIDITrack(name: track.name, notes: track.notes, noteEvents: track.noteEvents.map {
+                MIDINote(pitch: $0.pitch, startQuarter: written($0.startQuarter), endQuarter: written($0.endQuarter))
+            })
+        }
+        return MIDIFile(source: self, timeline: timeline, tracks: mapped, end: written(endQuarter))
+    }
+
     func practiceTempoBoundaries(score: MusicXMLScore?) -> Set<Double> {
         let exported = Set(segments.map(\.quarter))
         guard let score else { return exported }
@@ -264,15 +303,23 @@ public extension MIDIFile {
             guard (0.25...4).contains(recorded / effective) else {
                 throw MusicalError("This tempo exceeds the accompaniment’s playback range in this passage (¼× to 4× its recorded tempo).")
             }
-            if !timeline.isEmpty && effective == preceding { continue }
+            let i = segmentIndex(at: quarter, key: \.quarter)
+            var pause = 0.0
+            if i > 0 && segments[i].quarter == quarter {
+                let prior = segments[i - 1]
+                let arrival = prior.seconds + (quarter - prior.quarter) * prior.secondsPerQuarter
+                let gap = segments[i].seconds - arrival
+                if gap > 1e-7 { pause = gap * preceding / prior.secondsPerQuarter }
+            }
+            if !timeline.isEmpty && effective == preceding && pause == 0 { continue }
             let seconds = timeline.last.map { $0.seconds + (quarter - $0.quarter) * $0.secondsPerQuarter } ?? 0
-            timeline.append(TempoSegment(quarter: quarter, seconds: seconds, secondsPerQuarter: effective))
+            timeline.append(TempoSegment(quarter: quarter, seconds: seconds + pause, secondsPerQuarter: effective))
         }
         return MIDIFile(source: self, timeline: timeline)
     }
 
-    private init(source: MIDIFile, timeline: [TempoSegment]) {
-        ppqn = source.ppqn; tracks = source.tracks; endQuarter = source.endQuarter; segments = timeline
+    private init(source: MIDIFile, timeline: [TempoSegment], tracks: [MIDITrack]? = nil, end: Double? = nil) {
+        ppqn = source.ppqn; self.tracks = tracks ?? source.tracks; endQuarter = end ?? source.endQuarter; segments = timeline
     }
 }
 

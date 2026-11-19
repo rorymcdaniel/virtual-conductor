@@ -13,13 +13,14 @@ struct LongRestDisplay: Equatable {
               snapshot.time < timing.musicalEnd else {
             counter = nil; cueBeat = nil; return
         }
-        var quarter = timing.midi.quarter(atSeconds: timing.scoreTime(performanceSeconds: snapshot.time))
+        let seconds = timing.scoreTime(performanceSeconds: snapshot.time)
+        var quarter = timing.midi.quarter(atSeconds: seconds)
         // Tempo conversion can land a few ulps before an exact musical boundary.
         let boundaries = schedule.runs.flatMap { run in
             run.fullRestMeasures.map(\.startQuarter) + [run.endQuarter] +
                 (run.cue.map { [$0.quarter, $0.quarter + 1] } ?? [])
         }
-        if let boundary = boundaries.first(where: { abs($0 - quarter) < 1e-9 }) { quarter = boundary }
+        if let boundary = boundaries.first(where: { abs($0 - quarter) < 1e-9 && timing.midi.seconds(atQuarter: $0) <= seconds + 1e-7 }) { quarter = boundary }
         if let progress = schedule.progress(atQuarter: quarter) {
             counter = "\(progress.currentMeasure)/\(progress.run.fullMeasureCount)"
         } else { counter = nil }

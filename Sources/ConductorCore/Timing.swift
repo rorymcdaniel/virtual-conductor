@@ -55,7 +55,8 @@ public struct PerformanceTiming: Sendable {
         }
         let seconds = scoreTime(performanceSeconds: time)
         let raw = midi.quarter(atSeconds: seconds), nearest = raw.rounded()
-        let quarter = min(midi.endQuarter - 1e-8, abs(raw - nearest) < 1e-9 ? nearest : raw)
+        let onBeat = abs(raw - nearest) < 1e-9 && midi.seconds(atQuarter: nearest) <= seconds + 1e-7
+        let quarter = min(midi.endQuarter - 1e-8, onBeat ? nearest : raw)
         return ConductingPosition(beat: (Int(floor(quarter)) % 4 + 4) % 4, f: quarter - floor(quarter),
             measure: Int(floor(quarter / 4)) + (quarter < 0 ? 0 : 1), preparing: time < prepSeconds,
             leadIn: false, ended: seconds >= midi.duration, bpm: midi.tempo(atSeconds: min(seconds, midi.duration)))

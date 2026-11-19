@@ -24,6 +24,7 @@ struct FollowingConfiguration: Codable {
 /// Owns the validated score and the one current solo-staff selection.
 struct ScorePreparation {
     struct Loaded: Sendable {
+        let midi: MIDIFile
         let score: MusicXMLScore?
         fileprivate let identity: URL?
         let unavailable: String?
@@ -39,15 +40,24 @@ struct ScorePreparation {
             let xmlHash = data.map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() } ?? "no-xml"
             settingsKey = "following-v1-" + midiFingerprint + "-" + xmlHash
             guard musicXML != nil else {
+                self.midi = midi
                 score = nil; unavailable = "A matching MuseScore MusicXML export is required."
                 return
             }
             do {
                 guard let data else { throw MusicalError("The MusicXML export could not be read. Prepare it again.") }
                 let parsed = try MusicXMLScore(data: data)
-                try Self.validateMapping(score: parsed, midi: midi)
+                do {
+                    try Self.validateMapping(score: parsed, midi: midi)
+                    self.midi = midi
+                } catch {
+                    guard let mapped = midi.mappingCaesuras(at: parsed.caesuraQuarters) else { throw error }
+                    try Self.validateMapping(score: parsed, midi: mapped)
+                    self.midi = mapped
+                }
                 score = parsed; unavailable = nil
             } catch {
+                self.midi = midi
                 score = nil; unavailable = error.localizedDescription
             }
         }

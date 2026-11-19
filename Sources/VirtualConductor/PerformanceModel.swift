@@ -156,7 +156,7 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
                     let fingerprint = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
                     let score = ScorePreparation.Loaded(musicXML: musicXML, identity: scoreIdentity, midi: parsed,
                                                         midiFingerprint: fingerprint, keptTiming: preservingTake)
-                    return (midi: parsed, source: try PreparedPerformance.load(wav), fingerprint: fingerprint, score: score)
+                    return (midi: score.midi, source: try PreparedPerformance.load(wav), fingerprint: fingerprint, score: score)
                 }.value
                 guard token == run else { return }
                 var saved: [CadenzaPassage] = []; var warning = ""
