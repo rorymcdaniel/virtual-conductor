@@ -38,7 +38,7 @@ WAV and matching MusicXML are the tested inputs; live following can remain off.
 
 ## Live soloist following
 
-Load matching MusicXML with the MIDI and accompaniment WAV, then choose **Live following…**. Select the solo staff and microphone, enable following, and add any explicit wait points by measure and beat. The dialog shows the expected concert pitch from MusicXML. Save and start playback using headphones. The tempo tolerance defaults to ±10% and is configurable globally.
+Load matching MusicXML with the MIDI and accompaniment WAV, then choose **Live following…**. Select the solo staff and microphone, enable following, and add any explicit wait points by measure and beat. Use **Check microphone** and play one steady note to confirm the selected input hears its concert pitch. The dialog also shows the expected concert pitch for each wait point. Save and start playback using headphones. The tempo tolerance defaults to ±10% and is configurable globally.
 
 To change the default pace, open **Practice tempo…** beside **Start at measure**, enter a measure, beat and quarter-note BPM, and choose **Set tempo**. After pausing, **Use rehearsal start** targets the start of the passage and **Use last followed tempo** copies the most recent pace the orchestra confidently followed in this session. Each saved marking applies from that beat to the next tempo marking or the end. A local marking at the same beat takes precedence. Remove it in the same editor to hear the underlying tempo again.
 
@@ -50,7 +50,7 @@ Markings are saved on this Mac for the matching MIDI export. The conductor, clic
 
 When MuseScore renders a written caesura as an extra bar of MIDI playback time, the conductor holds at the pause and resumes on the written beat. Practice starts, clicks, and following use the printed measure numbers. The importer checks the note positions again after accounting for the pause.
 
-**Follow written cadenzas** is the default in Live following. For Strauss’s Second Horn Concerto, select **Corno Solo in Mib** and your microphone. The score supplies the orchestral release at measure 7, beat 1½ and the shared entrance at measure 13, beat 1. Play the written horn line with your own rubato and pauses. The orchestra listens for the return attack and resumes at the planned tempo. **Right Arrow** can cue the entrance if tracking is uncertain.
+**Follow written cadenzas** is the default in Live following. For Strauss’s Second Horn Concerto, select **Corno Solo in Mib** and your microphone. The score supplies the orchestral release at measure 7, beat 1½ and the shared entrance at measure 13, beat 1. Play the written horn line with your own rubato and pauses. The orchestra listens for the return attack and resumes at the planned tempo. Use **Cue return** or **Right Arrow** for a manual entrance if tracking is uncertain.
 
 **Live following → Free passages** lists the detected ranges. The app reads “Cadenza” or “Kadenz” directions during an orchestral rest. For an unlabelled passage it looks for at least two complete bars of orchestral silence containing at least three solo attacks, followed by an orchestral entrance. Enter a free passage there to specify other boundaries. If the solo rests at the return, the app counts the written rest at the planned tempo after the last note releases. If the solo holds a note across the return, use Right Arrow to choose the entrance.
 

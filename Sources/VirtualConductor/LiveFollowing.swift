@@ -65,6 +65,11 @@ extension InputCapture: FollowingInput {}
     var failed: ((String) -> Void)?
 
     private enum Phase { case audio, wait(Double), free(PassageRange), cadenza(CompiledCadenza) }
+    var canCue: Bool {
+        guard active else { return false }
+        if case .audio = phase { return false }
+        return true
+    }
 
     init(diagnostics: FollowingDiagnostics? = nil, capture: (any FollowingInput)? = nil, clock: @escaping () -> Double = { PerformanceAudio.hostSeconds },
          permission: @escaping () async -> Bool = { await AVCaptureDevice.requestAccess(for: .audio) },
@@ -274,15 +279,24 @@ extension InputCapture: FollowingInput {}
             case .cadenza: break
             case .free(let range):
                 let planned = prepared.practice.planned
-                if now - lastObservation > 0.5 { status = .lost; return }
+                if now - lastObservation > 0.5 {
+                    status = .lost; detail = "Waiting for microphone audio · Right Arrow cues the return"
+                    return
+                }
                 guard let index = tracker.index else {
-                    if lastPitch != nil && now - entered > 0.4 { status = .lost }
+                    if lastPitch != nil && now - entered > 0.4 {
+                        status = .lost; detail = "Listening for matching notes · Right Arrow cues the return"
+                    } else if now - entered > 1.5 {
+                        status = .lost; detail = "No clear pitch · check microphone and gain · Right Arrow cues the return"
+                    }
                     return
                 }
                 let note = plan.notes[index]
                 if note.startQuarter >= range.end - 1e-7 { try returnFromFree(range); return }
                 let followingNote = index + 1 < plan.notes.count ? plan.notes[index + 1] : nil
-                if now - tracker.lastMatch > 0.7 && lastPitch != nil { status = .lost }
+                if now - tracker.lastMatch > 0.7 && lastPitch != nil {
+                    status = .lost; detail = "Listening for matching notes · Right Arrow cues the return"
+                }
                 else if status != .lost || now - tracker.lastMatch < 0.3 {
                     // Allow the written rest and one beat of breathing room before
                     // treating silence in a recognized phrase as a deliberate pause.
@@ -293,6 +307,7 @@ extension InputCapture: FollowingInput {}
                     status = lastPitch == nil && paused ? .waiting : .following
                 }
                 if status == .lost { return }
+                detail = "Following your solo · Right Arrow cues the return"
                 let first = max(prepared.timing.prepSeconds, seconds(range.start))
                 let playedTime = planned.seconds(atQuarter: note.startQuarter) + max(0, now - tracker.lastAttack) * tracker.rate
                 let playedPosition = seconds(planned.quarter(atSeconds: playedTime))

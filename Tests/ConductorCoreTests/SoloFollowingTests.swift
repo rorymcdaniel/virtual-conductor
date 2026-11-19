@@ -39,6 +39,27 @@ enum FollowingFixture {
 }
 
 final class SoloFollowingTests: XCTestCase {
+    func testLiveCaptureHearsEitherInterfaceInputAndOppositePolarity() throws {
+        let rate = 12000.0
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1200))
+        buffer.frameLength = 1200
+        let channels = try XCTUnwrap(buffer.floatChannelData)
+        let storage = CaptureStorage(rate: rate, streaming: true)
+        // One plugged-in microphone just above the analysis floor, followed by
+        // the same microphone on the other input and a polarity-inverted pair.
+        for (first, second): (Float, Float) in [(1, 0), (0, 1), (1, -1)] {
+            for i in 0..<1200 {
+                let note = Float(sin(2 * .pi * 220 * Double(i) / rate)) * 0.00024
+                channels[0][i] = note * first
+                channels[1][i] = note * second
+            }
+            storage.receive(AVReadOnlyAudioPCMBuffer(copying: buffer), time: AVAudioTime(hostTime: 0))
+            let batch = try XCTUnwrap(storage.stream?.drain())
+            var analyzer = SoloAudioAnalyzer(sampleRate: rate)
+            XCTAssertEqual(analyzer.process(batch.samples).last?.pitch, 57)
+        }
+    }
     func testHeldPitchDoesNotJumpAcrossInterveningNotesOnAnAmplitudeAccent() throws {
         let notes = [60, 62, 64, 60].enumerated().map { MIDINote(pitch: $1, startQuarter: Double($0), endQuarter: Double($0 + 1)) }
         let midi = try FollowingFixture.midi()
@@ -696,6 +717,32 @@ final class SoloFollowingTests: XCTestCase {
         now = 20; following.observe(pitch: nil, time: now); following.tick()
         XCTAssertEqual(following.status, .lost); XCTAssertEqual(audio.played.count, 1)
         following.cue(); XCTAssertEqual(audio.played.last?.position, 4.5)
+    }
+    func testSilentCadenzaReportsMissingPitchAndAutomaticallyReturnsWhenHornIsHeard() async throws {
+        let audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
+        var now = 0.0
+        let following = LiveFollowing(diagnostics: makeDiagnostics(), capture: FollowingTestInput(), clock: { now }, permission: { true })
+        defer { following.stop() }
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], freePassages: [PassageRange(start: 0, end: 8)], cadenzas: [])
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        now = prepared.timing.prepSeconds; audio.sourcePosition = now; following.tick()
+        for _ in 0..<200 {
+            now += 0.01
+            following.observe(pitch: nil, time: now)
+            following.tick()
+        }
+        XCTAssertEqual(following.status, .lost)
+        XCTAssertTrue(following.detail.contains("microphone"))
+        XCTAssertTrue(following.canCue)
+        XCTAssertEqual(audio.played.count, 1)
+        for pitch in [60, 62, 64, 65, 60, 62, 64, 65, 60] {
+            now += 0.25
+            following.observe(pitch: pitch, time: now - 0.02)
+            following.observe(pitch: pitch, time: now)
+            following.tick()
+        }
+        XCTAssertEqual(audio.played.map(\.position), [0, 4.5])
+        XCTAssertFalse(following.canCue)
     }
     func testStopWhilePermissionPendingCannotStartMicrophoneOrPlayback() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()

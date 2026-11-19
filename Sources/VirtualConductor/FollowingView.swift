@@ -1,5 +1,6 @@
 import SwiftUI
 import ConductorCore
+import AVFoundation
 
 struct FollowingView: View {
     @ObservedObject var model: PerformanceModel
@@ -35,6 +36,7 @@ struct FollowingView: View {
                 }
                 ForEach(model.devices.filter(\.input)) { device in Text(device.name).tag(device.id) }
             }
+            FollowingMicrophoneCheck(inputID: inputID).id(inputID)
             Stepper("Global tempo tolerance: ±\(Int(tolerance))%", value: $tolerance, in: 0...75, step: 1)
             Picker("Cadenzas", selection: $values.followWrittenCadenzas) {
                 Text("Follow written cadenzas").tag(true)
@@ -151,8 +153,67 @@ struct FollowingView: View {
         "Measure \(Int(quarter / 4) + 1), beat \((quarter.truncatingRemainder(dividingBy: 4) + 1).formatted())"
     }
 
-    private func pitchName(_ pitch: Int) -> String {
-        ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"][pitch % 12] + String(pitch / 12 - 1)
+}
+
+private func pitchName(_ pitch: Int) -> String {
+    ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"][pitch % 12] + String(pitch / 12 - 1)
+}
+
+private struct FollowingMicrophoneCheck: View {
+    let inputID: UInt32
+    @State private var testing = false
+    @State private var result = ""
+
+    var body: some View {
+        HStack {
+            Button(testing ? "Stop check" : "Check microphone") {
+                testing.toggle()
+                result = testing ? "Play one steady note." : ""
+            }.disabled(inputID == 0)
+            Text(result).font(.callout)
+        }
+        .task(id: testing) {
+            guard testing else { return }
+            let capture = InputCapture()
+            defer { capture.release() }
+            do {
+                guard await AVCaptureDevice.requestAccess(for: .audio) else {
+                    throw MusicalError("Allow microphone access in System Settings to check this input.")
+                }
+                try Task.checkCancellation()
+                try await capture.startStreaming(device: inputID)
+                var analyzer = SoloAudioAnalyzer(sampleRate: capture.sampleRate)
+                var lastPitch: Int?, consecutive = 0
+                let start = ContinuousClock.now
+                while !Task.isCancelled {
+                    try await Task.sleep(for: .milliseconds(40))
+                    if let batch = capture.storage?.stream?.drain() {
+                        if batch.followsGap {
+                            analyzer = SoloAudioAnalyzer(sampleRate: capture.sampleRate)
+                            lastPitch = nil; consecutive = 0
+                        }
+                        for frame in analyzer.process(batch.samples) {
+                            consecutive = frame.pitch == lastPitch ? consecutive + 1 : 1
+                            lastPitch = frame.pitch
+                            if let pitch = frame.pitch, consecutive >= 6 {
+                                result = "Heard \(pitchName(pitch)) concert."
+                                testing = false
+                                return
+                            }
+                        }
+                    }
+                    if start.duration(to: .now) >= .seconds(10) {
+                        result = "No clear note heard. Check the microphone and input gain."
+                        testing = false
+                        return
+                    }
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                result = error.localizedDescription
+                testing = false
+            }
+        }
     }
 }
 
@@ -161,8 +222,15 @@ struct FollowingBanner: View {
     var body: some View {
         if following.active {
             VStack(alignment: .leading, spacing: 4) {
-                Label(following.status.rawValue, systemImage: icon)
-                    .font(.system(size: 18, weight: .bold))
+                HStack {
+                    Label(following.status.rawValue, systemImage: icon)
+                        .font(.system(size: 18, weight: .bold))
+                    Spacer()
+                    if following.canCue {
+                        Button("Cue return", action: following.cue)
+                            .controlSize(.small).help("Cue the accompaniment · Right Arrow")
+                    }
+                }
                 Text(following.detail).font(.caption)
                     .lineLimit(2).frame(height: 30, alignment: .topLeading)
                 ProgressView(value: min(1, Double(following.level) * 5)).frame(width: 120)
@@ -178,8 +246,7 @@ struct FollowingBanner: View {
             // from resizing the conducting surface during a phrase.
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.horizontal, 24).padding(.vertical, 8)
-            .allowsHitTesting(false)
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .contain)
         }
     }
     private var backgroundColor: Color {

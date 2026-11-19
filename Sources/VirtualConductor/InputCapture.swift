@@ -12,6 +12,8 @@ final class CaptureStorage: @unchecked Sendable {
     let peak = Atomic<Float>(0)
     let receiving = Atomic<Bool>(false)
     let stream: LiveSampleBuffer?
+    // Only the tap accesses this. Keep the same input while levels are comparable.
+    private var liveChannel = 0
     init(rate: Double, streaming: Bool = false) {
         stream = streaming ? LiveSampleBuffer(rate: rate) : nil
         capacity = streaming ? 1 : Int(rate * 120)
@@ -24,24 +26,46 @@ final class CaptureStorage: @unchecked Sendable {
         guard buffer.format.commonFormat == .pcmFormatFloat32 else { return }
         receivedFrames.store(receivedFrames.load(ordering:.relaxed) + Int(buffer.frameLength),ordering:.releasing)
         let size = Int(buffer.frameLength), channelCount = Int(buffer.format.channelCount)
+        guard size > 0, channelCount > 0 else { return }
         var maximum: Float = 0
+        if let stream {
+            // Interface inputs are independent microphones. Averaging them can
+            // discard a quiet solo or cancel two opposite-polarity signals.
+            if channelCount > 1 {
+                var strongest: Float = 0, current: Float = 0
+                var candidate = liveChannel
+                for c in 0..<channelCount {
+                    guard case .float(let channel) = buffer.channelData(c) else { continue }
+                    var energy: Float = 0
+                    for i in 0..<size {
+                        let value = channel[i * buffer.stride]
+                        energy += value * value
+                    }
+                    if c == liveChannel { current = energy }
+                    if energy > strongest { strongest = energy; candidate = c }
+                }
+                if strongest > current * 2 { liveChannel = candidate }
+            }
+            guard case .float(let channel) = buffer.channelData(liveChannel) else { return }
+            let duration = Double(size) / buffer.format.sampleRate
+            let start = time.isHostTimeValid ? AVAudioTime.seconds(forHostTime: time.hostTime) : PerformanceAudio.hostSeconds - duration
+            stream.write(count: size, start: start, sampleTime: time.isSampleTimeValid ? time.sampleTime : nil) { i in
+                let value = channel[i * buffer.stride]
+                maximum = max(maximum, abs(value))
+                return value
+            }
+            peak.store(maximum, ordering: .relaxed)
+            return
+        }
         let capturing = recording.load(ordering:.acquiring)
         var offset = count.load(ordering:.relaxed)
-        func monoSample(_ i: Int) -> Float {
+        for i in 0..<size {
             var value: Float = 0
             for c in 0..<channelCount {
                 if case .float(let channel) = buffer.channelData(c) { value += channel[i * buffer.stride] }
             }
             value /= Float(channelCount); maximum = max(maximum,abs(value))
             if capturing && offset < capacity { samples[offset] = value; offset += 1 }
-            return value
-        }
-        if let stream {
-            let duration = Double(size) / buffer.format.sampleRate
-            let start = time.isHostTimeValid ? AVAudioTime.seconds(forHostTime: time.hostTime) : PerformanceAudio.hostSeconds - duration
-            stream.write(count: size, start: start, sampleTime: time.isSampleTimeValid ? time.sampleTime : nil, sample: monoSample)
-        } else {
-            for i in 0..<size { _ = monoSample(i) }
         }
         if capturing { count.store(offset,ordering:.releasing) }
         peak.store(maximum,ordering:.relaxed)
