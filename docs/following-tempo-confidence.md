@@ -137,3 +137,20 @@ tolerance showed the following commanded rates, relative to the written tempo.
 Both opening-phrase replays and the earlier steady-horn and half-note regression
 cases passed. These excerpts contain detected pitches and attack times. The
 effect across a complete live performance still needs a rehearsal.
+
+## Expressive grace notes
+
+The follower reads the grace pitches attached to each principal note on the
+selected MusicXML staff. In accompanied playing it listens for the ornament near
+the written beat, carries its current pace while the ornament sounds, and starts
+estimating the next phrase from the principal. This also disambiguates a
+principal that repeats a half-beat later. At an explicit wait on that beat, the
+principal releases the orchestra. Playing the principal directly also works.
+
+The checked rehearsal excerpts did not contain the owner's grace-note passages.
+Generated audio using the concerto's solo pitches and written timing exercised
+40, 150, and 250 ms ornaments in measures 157, 158, 163, and 164. Each principal
+and its next four notes matched in order. The same check at the measure 156,
+beat 4 wait released on the principal for all three durations. These checks
+exercise pitch detection and tracking in software. The musical feel with live
+horn and headphones still needs a rehearsal.

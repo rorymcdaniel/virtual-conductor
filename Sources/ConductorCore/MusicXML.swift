@@ -113,6 +113,8 @@ public struct MusicXMLScore: Sendable {
             var staffNumbers = [1]
             var activeTies: [MusicXMLTieKey: Int] = [:]
             var graceTieStarts: [MusicXMLTieKey: Double] = [:]
+            var pendingGraces: [GraceLocation: [Int]] = [:]
+            var noteGraces: [Int: [Int: [Int]]] = [:]
             var graceOnsets: [Int: Set<Double>] = [:]
             var tremoloOnsets: [Int: Set<Double>] = [:]
             let partMeasures = part.children.filter { $0.name == "measure" }
@@ -179,6 +181,10 @@ public struct MusicXMLScore: Sendable {
                             let anchor = start + cursor
                             graceOnsets[staff, default: []].insert(anchor)
                             let pitch = element.concertPitch(transpose: transposition[staff] ?? transposition[0] ?? 0)
+                            if (0...127).contains(pitch), element.child("cue") == nil {
+                                let location = GraceLocation(staff: staff, voice: element.child("voice")?.text ?? "1", quarter: anchor)
+                                pendingGraces[location, default: []].append(pitch)
+                            }
                             ornaments.append(MIDINote(pitch: pitch, startQuarter: max(0, anchor - graceAllowance), endQuarter: anchor + graceAllowance))
                             if element.children.contains(where: { $0.name == "tie" && $0.attributes["type"] == "start" }) {
                                 let key = MusicXMLTieKey(staff: staff,
@@ -248,6 +254,11 @@ public struct MusicXMLScore: Sendable {
                                     }
                                     activeTies[key] = intervalIndex
                                 }
+                                let location = GraceLocation(staff: staff, voice: key.voice, quarter: start + onset)
+                                if let graces = pendingGraces.removeValue(forKey: location),
+                                   intervals[staff]?[intervalIndex].startQuarter == location.quarter {
+                                    noteGraces[staff, default: [:]][intervalIndex] = graces
+                                }
                                 pitches[staff, default: [:]][intervalIndex] = element.concertPitch(transpose: transposition[staff] ?? transposition[0] ?? 0)
                             }
                             previousOnset = onset
@@ -277,7 +288,8 @@ public struct MusicXMLScore: Sendable {
                 let displayName = staffNumbers.count == 1 ? name : "\(name) (staff \(staff))"
                 let sounding = intervals[staff] ?? []
                 let notes = sounding.enumerated().map { index, interval in
-                    MIDINote(pitch: pitches[staff]?[index] ?? -1, startQuarter: interval.startQuarter, endQuarter: interval.endQuarter)
+                    MIDINote(pitch: pitches[staff]?[index] ?? -1, startQuarter: interval.startQuarter, endQuarter: interval.endQuarter,
+                             gracePitches: noteGraces[staff]?[index])
                 }.sorted { $0.startQuarter < $1.startQuarter }
                 for note in notes {
                     if tremoloOnsets[staff]?.contains(note.startQuarter) == true {
@@ -300,6 +312,12 @@ public struct MusicXMLScore: Sendable {
         ornamentAttacks = ornaments
         measures = parsedMeasures
     }
+}
+
+private struct GraceLocation: Hashable {
+    let staff: Int
+    let voice: String
+    let quarter: Double
 }
 
 private struct MusicXMLTieKey: Hashable {

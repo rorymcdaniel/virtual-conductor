@@ -98,13 +98,21 @@ public struct SoloTracker: Codable, Sendable {
     // A short phrase proposing a large change needs another attack to confirm it.
     // Optional for compatibility with saved diagnostics from earlier versions.
     private var pendingTempoRate: Double?
+    // Written note whose lead-in is sounding. Only its resolution advances the score.
+    private var gracePrincipal: Int?
+    private var graceResolutionTime: Double?
+    public func isPlayingGrace(at time: Double) -> Bool {
+        gracePrincipal != nil && time - lastMatch < FollowingTempo.recentMatchWindow
+    }
     public var hasReliableTempo: Bool { tempoConfirmed ?? (anchors.count >= 3) }
 
     public init() {}
     public func validForReplay(noteCount: Int) -> Bool {
         let validIndex = index.map { $0 >= 0 && $0 < noteCount } ?? true
         let validPitches = [previousPitch, candidatePitch].allSatisfy { $0.map { (0...127).contains($0) } ?? true }
-        return validIndex && validPitches && searchStart >= 0 && searchStart <= noteCount &&
+        let validGrace = gracePrincipal.map { (0..<noteCount).contains($0) } ?? true
+        return validIndex && validGrace && (graceResolutionTime?.isFinite ?? true) &&
+            validPitches && searchStart >= 0 && searchStart <= noteCount &&
             candidateCount >= 0 && candidateCount < Int.max / 2 && silentFrames >= 0 && silentFrames < Int.max / 2 &&
             rate.isFinite && (0.1...4).contains(rate) && candidateSince.isFinite &&
             (pendingTempoRate.map { $0.isFinite && (0.1...4).contains($0) } ?? true) &&
@@ -152,19 +160,33 @@ public struct SoloTracker: Codable, Sendable {
         let repeatedAccent = previousPitch == pitch && rearticulated
         let attack = previousPitch != pitch || repeatedAccent
         previousPitch = pitch
-        // A change in loudness on a sustained pitch cannot skip intervening pitches.
-        if repeatedAccent, let index, notes[index].pitch == pitch,
-           index + 1 == notes.count || notes[index + 1].pitch != pitch {
-            lastMatch = time; releasedAt = nil
-            return nil
+        let next = max(searchStart, (index ?? (searchStart - 1)) + 1)
+        if let principal = gracePrincipal {
+            let note = notes[principal]
+            if isPlayingGrace(at: time), note.startQuarter <= throughQuarter + 1e-7 {
+                if pitch == note.pitch, attack {
+                    // The ornament has no metrical duration. Establish the next
+                    // phrase from the principal rather than fitting across it.
+                    lastAttack = candidateSince
+                    anchors = [Anchor(scoreTime: midi.seconds(atQuarter: note.startQuarter), hostTime: lastAttack)]
+                    index = principal; lastMatch = time; releasedAt = nil; gracePrincipal = nil
+                    graceResolutionTime = lastAttack
+                    return principal
+                }
+                if note.gracePitches?.contains(pitch) == true {
+                    lastMatch = time; releasedAt = nil
+                    return nil
+                }
+            }
+            gracePrincipal = nil
         }
+
         if !attack, let index, notes[index].pitch == pitch {
             lastMatch = time; releasedAt = nil
             return nil
         }
         guard attack else { return nil }
         let onset = repeatedAccent ? time : candidateSince
-        let next = max(searchStart, (index ?? (searchStart - 1)) + 1)
         let lower = !free && !hasReliableTempo ? searchStart : next
         var candidates = Array(next..<min(notes.count, next + (free ? 3 : 8)))
         if !free {
@@ -187,10 +209,32 @@ public struct SoloTracker: Codable, Sendable {
             }
         }
         if repeatedAccent, let index, notes[index].pitch == pitch { candidates = candidates.filter { $0 == next } }
-        guard let match = candidates.filter({ notes[$0].pitch == pitch && notes[$0].startQuarter <= throughQuarter + 1e-7 }).min(by: {
-            if free { return $0 < $1 }
-            return abs(notes[$0].startQuarter - expectedQuarter) < abs(notes[$1].startQuarter - expectedQuarter)
-        }) else {
+        // Prefer a written attack if the player is actually on that note.
+        // Otherwise a nearby notated ornament identifies its specific principal,
+        // even when that principal's pitch recurs later in the figure.
+        let ordinary = candidates.filter { notes[$0].pitch == pitch && notes[$0].startQuarter <= throughQuarter + 1e-7 }
+        let nearest = ordinary.min {
+            free ? $0 < $1 : abs(notes[$0].startQuarter - expectedQuarter) < abs(notes[$1].startQuarter - expectedQuarter)
+        }
+        if let grace = Self.principalForGrace(in: candidates, notes: notes, pitch: pitch, next: next,
+                                           quarter: expectedQuarter, through: throughQuarter, free: free, ordinary: nearest) {
+            gracePrincipal = grace; lastMatch = time; releasedAt = nil
+            tempoConfirmed = false; pendingTempoRate = nil
+            return nil
+        }
+        // An accent on a held pitch can articulate its immediate repetition
+        // or the next written ornament. Otherwise it refreshes the sounding note.
+        if repeatedAccent, let index, notes[index].pitch == pitch,
+           next == notes.count || notes[next].pitch != pitch {
+            lastMatch = time; releasedAt = nil
+            return nil
+        }
+        // The accompaniment can still be ahead just after a lengthened ornament.
+        // For close repeated pitches, check the next attack against the interval
+        // the soloist actually played before falling back to transport proximity.
+        let sequential = !free && ordinary.count > 1 && ordinary.contains(next) &&
+            continuesGracePhrase(at: onset, next: next, notes: notes, midi: midi)
+        guard let match = sequential ? next : nearest else {
             // An unrecognized pitch supplies no timing evidence. Keep the
             // previous phrase so the next correct attack can corroborate it.
             if !free { tempoConfirmed = false; pendingTempoRate = nil }
@@ -205,7 +249,9 @@ public struct SoloTracker: Codable, Sendable {
         // Position recovery is useful without being evidence of faster playing.
         // Start a new phrase after a skipped or backwards match; retain its last
         // trusted pace until subsequent attacks corroborate the new position.
-        if !free, let index, match != index + 1 { anchors = []; tempoConfirmed = false; pendingTempoRate = nil }
+        if !free, let index, match != index + 1 {
+            anchors = []; tempoConfirmed = false; pendingTempoRate = nil; graceResolutionTime = nil
+        }
         let scoreTime = midi.seconds(atQuarter: notes[match].startQuarter)
         // Estimate pace over a short phrase. A frame of onset jitter on a single
         // triplet should not drive the accompaniment all the way to its tempo limit.
@@ -239,6 +285,25 @@ public struct SoloTracker: Codable, Sendable {
         }
         index = match; lastMatch = time; lastAttack = onset; releasedAt = nil
         return match
+    }
+
+    private static func principalForGrace(in candidates: [Int], notes: [MIDINote], pitch: Int, next: Int,
+                                       quarter: Double, through: Double, free: Bool, ordinary: Int?) -> Int? {
+        let grace = candidates.filter { index in
+            let note = notes[index]
+            return index >= next && note.pitch != pitch && note.gracePitches?.contains(pitch) == true &&
+                note.startQuarter <= through + 1e-7 && (free ? index == next : abs(note.startQuarter - quarter) <= 0.5)
+        }.min { abs(notes[$0].startQuarter - quarter) < abs(notes[$1].startQuarter - quarter) }
+        guard let grace, let ordinary else { return grace }
+        if free { return ordinary <= grace ? nil : grace }
+        return abs(notes[ordinary].startQuarter - quarter) < abs(notes[grace].startQuarter - quarter) ? nil : grace
+    }
+
+    private func continuesGracePhrase(at onset: Double, next: Int, notes: [MIDINote], midi: MIDIFile) -> Bool {
+        guard let resolved = graceResolutionTime, onset - resolved <= 1.5, let index else { return false }
+        let interval = midi.seconds(atQuarter: notes[next].startQuarter) - midi.seconds(atQuarter: notes[index].startQuarter)
+        let played = (onset - lastAttack) * rate
+        return abs(interval - played) <= min(0.15, max(0.05, interval * 0.35))
     }
 
     private static func phraseFit(_ phrase: ArraySlice<Anchor>) -> (rate: Double, consistent: Bool) {

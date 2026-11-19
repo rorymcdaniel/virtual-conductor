@@ -10,7 +10,11 @@ public struct MIDINote: Equatable, Codable, Sendable {
     public let pitch: Int
     public let startQuarter: Double
     public let endQuarter: Double
-    public init(pitch: Int, startQuarter: Double, endQuarter: Double) {
+    /// Optional written ornament leading into this attack, in concert pitch.
+    /// MIDI-only notes and older diagnostic recordings have no grace metadata.
+    public let gracePitches: [Int]?
+    public init(pitch: Int, startQuarter: Double, endQuarter: Double, gracePitches: [Int]? = nil) {
+        self.gracePitches = gracePitches
         self.pitch = pitch; self.startQuarter = startQuarter; self.endQuarter = endQuarter
     }
 }

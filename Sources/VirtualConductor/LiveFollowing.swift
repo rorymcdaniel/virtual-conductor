@@ -260,7 +260,8 @@ extension InputCapture: FollowingInput {}
                     status = .following; detail = "Following within ±\(Int(tolerance))%"
                 }
             case .wait:
-                if now - lastObservation > 0.5 || (lastPitch != nil && now - entered > 0.7) { status = .lost }
+                if tracker.isPlayingGrace(at: now), now - lastObservation <= 0.5 { status = .waiting }
+                else if now - lastObservation > 0.5 || (lastPitch != nil && now - entered > 0.7) { status = .lost }
             case .cadenza: break
             case .free(let range):
                 let planned = prepared.practice.planned
