@@ -7,6 +7,7 @@ struct PracticeTempo {
     struct Edits: Codable {
         var marks: [PracticeTempoMark] = []
         var deleted: Set<Double> = []
+        var isEmpty: Bool { marks.isEmpty && deleted.isEmpty }
     }
 
     let marks: [PracticeTempoMark]

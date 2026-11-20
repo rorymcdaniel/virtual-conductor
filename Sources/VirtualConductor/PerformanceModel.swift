@@ -17,6 +17,11 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         let wav: URL
         let musicXML: URL?
         let scoreIdentity: URL?
+        let midiFingerprint: String?
+
+        func refersToSameScore(as other: Self) -> Bool {
+            midi == other.midi || (scoreIdentity != nil && scoreIdentity == other.scoreIdentity)
+        }
     }
     private static let recentRehearsalKey = "recent-rehearsal-v1"
 
@@ -134,10 +139,13 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         return AudioDevices.defaultID(input: true)
     }
 
+    private var recentRehearsal: RehearsalLocation? {
+        guard let data = defaults.data(forKey: Self.recentRehearsalKey) else { return nil }
+        return try? JSONDecoder().decode(RehearsalLocation.self, from: data)
+    }
+
     func restoreRehearsal() {
-        guard state == .empty,
-              let data = defaults.data(forKey: Self.recentRehearsalKey),
-              let location = try? JSONDecoder().decode(RehearsalLocation.self, from: data) else { return }
+        guard state == .empty, let location = recentRehearsal else { return }
         load(midi: location.midi, wav: location.wav, musicXML: location.musicXML, scoreIdentity: location.scoreIdentity)
     }
 
@@ -164,21 +172,24 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
                 catch { warning = " Saved settings could not load: \(error.localizedDescription)"; saved = [] }
                 let boundaries = result.midi.practiceTempoBoundaries(score: result.score.score)
                 var edits = PracticeTempo.Edits()
-                if let data = defaults.data(forKey: "practice-tempos-" + result.fingerprint) {
-                    do {
-                        let decoder = JSONDecoder()
-                        let saved = try (try? decoder.decode(PracticeTempo.Edits.self, from: data))
-                            ?? PracticeTempo.Edits(marks: decoder.decode([PracticeTempoMark].self, from: data))
-                        _ = try result.midi.applyingTempoMarks(saved.marks, boundaries: boundaries, deleted: saved.deleted)
-                        edits = saved
-                    } catch { warning += " Saved practice tempos could not load." }
-                }
+                do {
+                    let saved = try savedTempoEdits(for: result.fingerprint)
+                    _ = try result.midi.applyingTempoMarks(saved.marks, boundaries: boundaries, deleted: saved.deleted)
+                    edits = saved
+                } catch { warning += " Saved practice tempos could not load." }
                 let prep = preparation, values = saved, tempoEdits = edits
                 let new = try await Task.detached { try PreparedPerformance(midi:result.midi,source:result.source,preparation:prep,passages:values,tempoMarks:tempoEdits.marks,tempoBoundaries:boundaries,deletedTempos:tempoEdits.deleted) }.value
                 guard token == run else { return }
                 scorePreparation.finishLoading(result.score, generation: scoreToken)
                 let location = RehearsalLocation(midi: midi.standardizedFileURL, wav: wav.standardizedFileURL,
-                                                 musicXML: musicXML?.standardizedFileURL, scoreIdentity: scoreIdentity?.standardizedFileURL)
+                                                 musicXML: musicXML?.standardizedFileURL, scoreIdentity: scoreIdentity?.standardizedFileURL,
+                                                 midiFingerprint: result.fingerprint)
+                var tempoNotice = ""
+                if edits.isEmpty, let previous = rehearsalLocation ?? recentRehearsal,
+                   previous.refersToSameScore(as: location), let oldKey = previous.midiFingerprint,
+                   oldKey != result.fingerprint, let oldEdits = try? savedTempoEdits(for: oldKey), !oldEdits.isEmpty {
+                    tempoNotice = " Using this export’s score tempos. Your practice tempo edits are saved with the previous export."
+                }
                 rehearsalLocation = location
                 if let data = try? JSONEncoder().encode(location) {
                     defaults.set(data, forKey: Self.recentRehearsalKey)
@@ -192,7 +203,7 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
                 else { recording.setScore(result.midi, fingerprint:result.fingerprint) }
                 position = 0; segmentStart = 0; passageIndex = 0; state = .ready
                 if !outputMissing { chooseOutput() }
-                message = "\(result.midi.measures) measures · opening ♩ = \(String(format:"%.1f",new.practice.planned.openingBPM)). Ready.\(warning)"
+                message = "\(result.midi.measures) measures · opening ♩ = \(String(format:"%.1f",new.practice.planned.openingBPM)). Ready.\(warning)\(tempoNotice)"
                 if new.duration + 0.1 < new.midi.duration { message += " Audio ends before MIDI; check the matching exports." }
                 importOpen = false
             } catch { guard token == run else { return }; scorePreparation.failLoading(generation: scoreToken); state = .error; message = "Could not load exports: \(error.localizedDescription)" }
@@ -215,6 +226,13 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         rebuild(startMeasure: measure)
         return true
     }
+    private func savedTempoEdits(for fingerprint: String) throws -> PracticeTempo.Edits {
+        guard let data = defaults.data(forKey: "practice-tempos-" + fingerprint) else { return .init() }
+        let decoder = JSONDecoder()
+        if let edits = try? decoder.decode(PracticeTempo.Edits.self, from: data) { return edits }
+        return try PracticeTempo.Edits(marks: decoder.decode([PracticeTempoMark].self, from: data))
+    }
+
     func saveTempoMarks(_ marks: [PracticeTempoMark]) throws {
         try saveTempoEdits(.init(marks: marks, deleted: prepared?.practice.deleted ?? []))
     }

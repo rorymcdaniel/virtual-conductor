@@ -140,6 +140,35 @@ final class PracticeTempoTests: XCTestCase {
 
     }
 
+    @MainActor func testReplacingRecentExportExplainsWhyItsPracticeTemposChanged() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = UUID().uuidString, midi = root.appendingPathComponent("practice.mid"), wav = root.appendingPathComponent("practice.wav")
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        try rampMIDI().write(to: midi)
+        try Interpretation.encodeWAV(samples: Array(repeating: 0, count: 8000), sampleRate: 8000).write(to: wav)
+        let original = PerformanceModel(defaults: defaults)
+        original.outputMissing = true
+        original.load(midi: midi, wav: wav)
+        while original.state == .loading { await Task.yield() }
+        try original.saveTempoMarks([.init(quarter: 4, bpm: 80)])
+        try rampMIDI(finalTempo: 400_000).write(to: midi)
+
+        let reopened = PerformanceModel(defaults: defaults)
+        reopened.outputMissing = true
+        reopened.restoreRehearsal()
+        while reopened.state == .loading { await Task.yield() }
+        XCTAssertEqual(reopened.prepared?.practice.bpm(atQuarter: 4), 150)
+        XCTAssertTrue(reopened.message.contains("previous export"))
+        try rampMIDI().write(to: midi)
+        reopened.reload()
+        while reopened.state == .loading { await Task.yield() }
+        XCTAssertEqual(reopened.prepared?.practice.bpm(atQuarter: 4), 80)
+        XCTAssertFalse(reopened.message.contains("previous export"))
+    }
+
     @MainActor func testFixedPlaybackUsesPracticeRateThroughRestartAndNextMarkOnThisMac() async throws {
         guard ProcessInfo.processInfo.environment["VC_DEVICE_CHECK"] == "1" else {
             throw XCTSkip("Set VC_DEVICE_CHECK=1 to check fixed playback with silent audio.")
