@@ -51,6 +51,9 @@ extension InputCapture: FollowingInput {}
     private var phase: Phase = .audio
     private var lastTick = 0.0
     private var entered = 0.0
+    private var listeningSince: Double?
+    private var lastExpectedSound: Double?
+    private static let trackingLossDelay = 1.5
     private var lastPitch: Int?
     private var lastObservation = 0.0
     private var droppedSamples = 0
@@ -173,6 +176,7 @@ extension InputCapture: FollowingInput {}
         }
         guard let buffer = buffers[location] else { throw MusicalError("Following playback boundary is unavailable. Reset and start again.") }
         phase = .audio; audioEnd = buffer.end
+        listeningSince = nil; lastExpectedSound = nil
         audio.setRate(prepared.practice.sourceRate(at: location) * tempo.rate)
         try audio.play(buffer, immediate: !initial)
         status = .following; detail = "Following within ±\(Int(tolerance))%"
@@ -246,6 +250,7 @@ extension InputCapture: FollowingInput {}
                 let planned = prepared.practice.planned
                 let q = quarter(position)
                 if prepared.timing.scoreTime(performanceSeconds: position) - prepared.midi.seconds(atQuarter: q) > 1e-6 {
+                    listeningSince = nil
                     writtenRest = true
                     audio.setRate(baseRate * tempo.rate)
                     status = .following; detail = "Caesura · waiting through the recorded pause"
@@ -253,7 +258,12 @@ extension InputCapture: FollowingInput {}
                 }
                 let expectingSound = plan.notes.contains { $0.startQuarter <= q && q < $0.endQuarter }
                 writtenRest = !expectingSound
-                let age = now - tracker.lastMatch
+                if expectingSound {
+                    if listeningSince == nil { listeningSince = now }
+                    lastExpectedSound = now
+                } else if let lastExpectedSound, now - lastExpectedSound >= Self.trackingLossDelay {
+                    listeningSince = nil
+                }
                 let input = FollowingTempoInput.accompanied(delta: delta, tolerance: tolerance / 100, tracker: tracker,
                     notes: plan.notes, midi: planned, scoreTime: planned.seconds(atQuarter: q), time: now)
                 let before = tempo
@@ -263,7 +273,7 @@ extension InputCapture: FollowingInput {}
                 if expectingSound && !input.isHolding { lastFollowedBPM = bpm * rate }
                 diagnostics.recordControl(FollowingControlDecision(time: now, scoreTime: planned.seconds(atQuarter: q),
                     plannedBPM: bpm, before: before, input: input, rate: rate))
-                if expectingSound && age > 1.5 && now - entered > 1.5 {
+                if expectingSound, let listeningSince, now - max(listeningSince, tracker.lastMatch) > Self.trackingLossDelay {
                     status = .lost; detail = "Keeping moving · listening for your position"
                 } else if writtenRest {
                     status = .following; detail = "Written solo rest · keeping the pulse"

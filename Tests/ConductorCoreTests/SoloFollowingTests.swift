@@ -408,6 +408,38 @@ final class SoloFollowingTests: XCTestCase {
         testDiagnostics = []
     }
 
+    func testTrackingLossAllowsTimeToEnterAfterPreparationAndWrittenSilence() async throws {
+        let base = try FollowingFixture.prepared()
+        let prepared = try PreparedPerformance(midi: base.midi, source: base.source, preparation: 2, passages: [])
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0, soloRestMeasures: [1]),
+                                     solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        let audio = FollowingTestAudio(), diagnostics = makeDiagnostics()
+        var now = 0.0
+        let following = LiveFollowing(diagnostics: diagnostics, capture: FollowingTestInput(), clock: { now },
+                                      permission: { true }, defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+        defer { following.stop() }
+        func advance(to time: Double) {
+            while now < time {
+                now = min(time, now + 0.01)
+                audio.sourcePosition = now
+                following.tick()
+            }
+        }
+        let opening = prepared.timing.prepSeconds
+        advance(to: opening + 0.2)
+        XCTAssertEqual(following.status, .holding)
+        XCTAssertFalse(diagnostics.report!.notices.contains { $0.reason.contains("Tracking lost") })
+        advance(to: opening + 1.7)
+        XCTAssertEqual(following.status, .lost)
+        advance(to: opening + 3.9)
+        XCTAssertEqual(following.status, .following)
+        advance(to: opening + 4.2)
+        XCTAssertEqual(following.status, .holding)
+        advance(to: opening + 5.7)
+        XCTAssertEqual(following.status, .lost)
+    }
+
     func testUnconfirmedPhraseDisplaysHoldingTempoUntilItCanFollow() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
         var now = 0.0
