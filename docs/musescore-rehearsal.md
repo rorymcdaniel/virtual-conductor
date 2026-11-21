@@ -2,6 +2,8 @@
 
 This feature is integrated into Virtual Conductor and ready for personal testing. The intended loop is **play freely → hear accompaniment → keep it**. There is no need to export MIDI/WAV or edit tempo numbers by hand.
 
+For explicit measure-and-beat changes that preserve written directions, see [Edit MuseScore playback tempos](musescore-playback-tempo.md).
+
 ## First use
 
 1. Build with `Scripts/build-virtual-conductor.sh` and open `.build/virtual-conductor/Virtual Conductor.app`.

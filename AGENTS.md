@@ -49,6 +49,9 @@ and local/remote synchronization before finishing.
 
 ## Agent skills
 
+For playback tempo edits in an open MuseScore score or checks on its saved
+exports, use [the MuseScore playback tempo workflow](docs/musescore-playback-tempo.md).
+
 ### Issue tracker
 
 Use GitHub Issues for this repo. Read `docs/agents/issue-tracker.md`

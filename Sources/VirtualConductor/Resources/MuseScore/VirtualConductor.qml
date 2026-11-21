@@ -16,10 +16,15 @@ MuseScore {
     property string lastRequest: ""
     property var linkedScore: null
     property string revision: ""
-    onRun: { linkedScore = curScore; poll.start(); processRequest() }
+    property string lastTempoRequest: ""
+    property var tempoScore: null
+    property string tempoSnapshot: ""
+    onRun: { linkedScore = curScore; poll.start(); processRequest(); processTempoRequest() }
     Text { anchors.fill: parent; anchors.margins: 16; text: root.status; wrapMode: Text.WordWrap; color: "#eeeeee" }
     FileIO { id: requestFile; source: root.bridge + "/request.json" }
     FileIO { id: responseFile; source: root.bridge + "/response.json" }
+    FileIO { id: tempoRequestFile; source: root.bridge + "/tempo-request.json" }
+    FileIO { id: tempoResponseFile; source: root.bridge + "/tempo-response.json" }
     function processRequest() {
             if (!requestFile.exists()) return;
             var read = requestFile.read();
@@ -46,5 +51,42 @@ MuseScore {
             } catch (error) { result.error = String(error); root.status = result.error }
             responseFile.write(JSON.stringify(result));
     }
-    Timer { id: poll; interval: 350; repeat: true; onTriggered: root.processRequest() }
+    function processTempoRequest() {
+        if (!tempoRequestFile.exists()) return;
+        var req;
+        try { req = JSON.parse(tempoRequestFile.read()) } catch (e) { return }
+        if (!req.id || req.id === root.lastTempoRequest) return;
+        root.lastTempoRequest = req.id;
+        tempoResponseFile.write(JSON.stringify(handleTempoRequest(req)));
+    }
+    function handleTempoRequest(req) {
+        var result = {id: req.id, success: false};
+        try {
+            if (Date.now() > req.expires) throw new Error("Tempo request expired.");
+            if (!curScore) throw new Error("Open a score in MuseScore first.");
+            if (req.operation === 'status' || req.operation === 'prepare') {
+                result.document = Tempo.documentInfo(curScore);
+                if (req.compare || req.operation === 'prepare') result.revision = Tempo.signature(curScore);
+                if (req.operation === 'prepare') {
+                    result.plan = Tempo.playbackPlan(root, curScore, req);
+                    root.tempoScore = curScore;
+                    root.tempoSnapshot = req.id;
+                }
+            } else if (req.operation === 'apply') {
+                if (req.snapshot !== root.tempoSnapshot || !curScore.is(root.tempoScore) ||
+                    Tempo.signature(curScore) !== req.revision)
+                    throw new Error("The active score changed. Prepare the tempo edit again.");
+                root.tempoSnapshot = "";
+                Tempo.applyPlayback(root, curScore, req);
+                result.revision = Tempo.signature(curScore);
+                root.status = "Playback tempos edited. Undo is available. Save your score when ready.";
+            } else throw new Error("Unknown tempo request.");
+            result.success = true;
+        } catch (error) { result.error = String(error) }
+        return result;
+    }
+    Timer {
+        id: poll; interval: 350; repeat: true
+        onTriggered: { root.processRequest(); root.processTempoRequest() }
+    }
 }
