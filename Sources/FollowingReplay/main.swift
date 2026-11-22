@@ -28,7 +28,10 @@ do {
             let report = try FollowingDiagnostic.decode(Data(contentsOf: url))
             let observations = test.source == "audio" ? try analyzeAudio(url, report: report) : nil
             let result = try FollowingRehearsal.run(test, report: report, audioObservations: observations)
-            print(String(format: "%@: %@ (%@), %d frames, %d matches, %.3f–%.3fx planned tempo", result.passed ? "PASS" : "FAIL", test.name, test.source, result.frames, result.matches, result.minimumRate, result.maximumRate))
+            let timing = result.medianAttackErrorBeats.map { String(format: "%.3f beats", $0) } ?? "unavailable"
+            print(String(format: "%@: %@ (%@), %d frames, %d matches, %.3f–%.3fx planned tempo, median attack error %@",
+                result.passed ? "PASS" : "FAIL", test.name, test.source, result.frames, result.matches,
+                result.minimumRate, result.maximumRate, timing))
             failed = failed || !result.passed
         }
         print("Continuous recognition and simulated accompaniment control; excludes physical device latency and acoustic output.")

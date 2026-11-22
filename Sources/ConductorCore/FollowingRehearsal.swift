@@ -13,6 +13,7 @@ public struct FollowingRehearsalCase: Codable, Sendable {
     public let minimumRate: Double
     public let maximumRate: Double
     public let minimumMatches: Int
+    public let maximumMedianAttackErrorBeats: Double?
 }
 
 public struct FollowingRehearsalResult: Sendable {
@@ -20,6 +21,7 @@ public struct FollowingRehearsalResult: Sendable {
     public let matches: Int
     public let minimumRate: Double
     public let maximumRate: Double
+    public let medianAttackErrorBeats: Double?
     public let passed: Bool
 }
 
@@ -34,7 +36,8 @@ public enum FollowingRehearsal {
                test.minimumRate, test.maximumRate].allSatisfy(\.isFinite),
               test.fromQuarter <= test.checkFromQuarter, test.checkFromQuarter < test.toQuarter,
               (0.25...1.75).contains(test.startingRate), test.minimumRate <= test.maximumRate,
-              test.minimumMatches > 0, ["decisions", "audio"].contains(test.source) else {
+              test.minimumMatches > 0, ["decisions", "audio"].contains(test.source),
+              test.maximumMedianAttackErrorBeats.map({ $0.isFinite && $0 >= 0 }) ?? true else {
             throw MusicalError("Invalid rehearsal case: \(test.name)")
         }
         let events = report.decisions.filter { $0.expectedQuarter >= test.fromQuarter && $0.expectedQuarter < test.toQuarter }
@@ -62,15 +65,19 @@ public enum FollowingRehearsal {
         var tracker = first.tracker, controller = FollowingTempo()
         _ = controller.update(delta: 100, tolerance: report.tolerance/100, trackedRate: test.startingRate, phaseError: 0, age: 0)
         var position = report.midi.seconds(atQuarter: first.expectedQuarter), previous = first.time
-        var minimum = Double.infinity, maximum = -Double.infinity, matches = 0, checked = 0
+        var minimum = Double.infinity, maximum = -Double.infinity, checked = 0
+        var attackErrors: [Double] = []
         let checkTime = report.decisions.first { $0.expectedQuarter >= test.checkFromQuarter }?.time ?? .infinity
         for observation in observations {
             let delta = observation.time - previous
             guard delta >= 0 && delta <= 0.25 else { throw MusicalError("Rehearsal observations contain a timing discontinuity.") }
             position += delta * controller.rate
-            if tracker.observe(pitch: observation.pitch, time: observation.time, notes: report.notes,
-                expectedQuarter: report.midi.quarter(atSeconds: position), free: false, midi: report.midi,
-                rearticulated: observation.rearticulated) != nil, observation.time >= checkTime { matches += 1 }
+            let quarter = report.midi.quarter(atSeconds: position)
+            if let index = tracker.observe(pitch: observation.pitch, time: observation.time, notes: report.notes,
+                expectedQuarter: quarter, free: false, midi: report.midi,
+                rearticulated: observation.rearticulated), observation.time >= checkTime {
+                attackErrors.append(abs(quarter - report.notes[index].startQuarter))
+            }
             let input = FollowingTempoInput.accompanied(delta: min(0.1, delta), tolerance: report.tolerance/100,
                 tracker: tracker, notes: report.notes, midi: report.midi, scoreTime: position, time: observation.time)
             let rate = controller.update(input)
@@ -78,7 +85,12 @@ public enum FollowingRehearsal {
             previous = observation.time
         }
         guard checked > 0 else { throw MusicalError("No observations in the assertion interval.") }
-        return FollowingRehearsalResult(frames: observations.count, matches: matches, minimumRate: minimum,
-            maximumRate: maximum, passed: minimum >= test.minimumRate - 1e-9 && maximum <= test.maximumRate + 1e-9 && matches >= test.minimumMatches)
+        attackErrors.sort()
+        let count = attackErrors.count
+        let median = count == 0 ? nil : (attackErrors[(count - 1) / 2] + attackErrors[count / 2]) / 2
+        let timingPasses = test.maximumMedianAttackErrorBeats.map { (median ?? .infinity) <= $0 } ?? true
+        return FollowingRehearsalResult(frames: observations.count, matches: count, minimumRate: minimum,
+            maximumRate: maximum, medianAttackErrorBeats: median, passed: timingPasses && count >= test.minimumMatches &&
+                minimum >= test.minimumRate - 1e-9 && maximum <= test.maximumRate + 1e-9)
     }
 }
