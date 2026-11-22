@@ -315,6 +315,26 @@ final class SoloFollowingTests: XCTestCase {
         XCTAssertEqual(tracker.rate, 1, accuracy: 0.02)
     }
 
+    func testNextSparseAttackCanConfirmTempoAcrossABriefUnmatchedPitch() throws {
+        let midi = try FollowingFixture.midi()
+        let notes = (0..<5).map { i in
+            MIDINote(pitch: 60 + i, startQuarter: Double(2 * i), endQuarter: Double(2 * i + 2))
+        }
+        for (unmatchedFrames, lastIndex, shouldConfirm) in [(2, 3, true), (30, 3, false), (2, 4, false)] {
+            var tracker = SoloTracker()
+            for frame in 0...376 {
+                let index = frame < 375 ? frame / 125 : lastIndex
+                let noise = (375 - unmatchedFrames..<375).contains(frame)
+                tracker.observe(pitch: noise ? 90 : notes[index].pitch, time: Double(frame) / 100,
+                    notes: notes, expectedQuarter: notes[index].startQuarter, free: false, midi: midi)
+                if frame == 374 { XCTAssertEqual(tracker.rate, 1) }
+            }
+            XCTAssertEqual(tracker.index, lastIndex)
+            XCTAssertEqual(tracker.hasReliableTempo, shouldConfirm)
+            XCTAssertEqual(tracker.rate, shouldConfirm ? 0.8 : 1, accuracy: 0.01)
+        }
+    }
+
     func testRecognizingTheSameWrittenNoteAgainPreservesItsOnset() throws {
         let notes = [60, 62, 64, 64].enumerated().map { index, pitch in
             MIDINote(pitch: pitch, startQuarter: Double(index), endQuarter: Double(index + 1))

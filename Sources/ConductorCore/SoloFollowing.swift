@@ -130,7 +130,11 @@ public struct SoloTracker: Codable, Sendable {
     private var candidatePitch: Int?
     private var candidateCount = 0
     private var silentFrames = 0
-    private struct Anchor: Codable, Sendable { let scoreTime: Double; let hostTime: Double }
+    private struct Anchor: Codable, Sendable {
+        let scoreTime: Double
+        let hostTime: Double
+        var attackError: Double?
+    }
     private var anchors: [Anchor] = []
     private var candidateSince = 0.0
     private var previousFrameTime: Double?
@@ -140,6 +144,7 @@ public struct SoloTracker: Codable, Sendable {
     // A short phrase proposing a large change needs another attack to confirm it.
     // Optional for compatibility with saved diagnostics from earlier versions.
     private var pendingTempoRate: Double?
+    private var pendingMismatchSince: Double?
     // Written note whose lead-in is sounding. Only its resolution advances the score.
     private var gracePrincipal: Int?
     private var graceResolutionTime: Double?
@@ -148,6 +153,18 @@ public struct SoloTracker: Codable, Sendable {
         gracePrincipal != nil && time - lastMatch < FollowingTempo.recentMatchWindow
     }
     public var hasReliableTempo: Bool { tempoConfirmed ?? (anchors.count >= 3) }
+
+    // Use the smallest offset supported by three successive attacks. Repeated
+    // frames of a held note can refresh pitch confidence but cannot add votes.
+    func corroboratedAttackError(for note: MIDINote?, at time: Double) -> Double? {
+        guard !hasReliableTempo, gracePrincipal == nil, let note, candidatePitch == note.pitch,
+              candidateCount >= 2, time - lastAttack < 1.5 else { return nil }
+        let errors = anchors.suffix(3).compactMap(\.attackError)
+        guard errors.count == 3, let low = errors.min(), let high = errors.max() else { return nil }
+        if low > 0.10 { return low }
+        if high < -0.10 { return high }
+        return nil
+    }
 
     public init() {}
     public func validForReplay(noteCount: Int) -> Bool {
@@ -160,9 +177,12 @@ public struct SoloTracker: Codable, Sendable {
             candidateCount >= 0 && candidateCount < Int.max / 2 && silentFrames >= 0 && silentFrames < Int.max / 2 &&
             rate.isFinite && (0.1...4).contains(rate) && candidateSince.isFinite &&
             (pendingTempoRate.map { $0.isFinite && (0.1...4).contains($0) } ?? true) &&
+            (pendingMismatchSince?.isFinite ?? true) &&
             (lastMatch.isFinite || lastMatch == -.infinity) && (lastAttack.isFinite || lastAttack == -.infinity) &&
             (releasedAt?.isFinite ?? true) && (previousFrameTime?.isFinite ?? true) &&
-            anchors.count <= 10000 && anchors.allSatisfy { $0.hostTime.isFinite && $0.scoreTime.isFinite }
+            anchors.count <= 10000 && anchors.allSatisfy {
+                $0.hostTime.isFinite && $0.scoreTime.isFinite && ($0.attackError?.isFinite ?? true)
+            }
     }
 
     public mutating func reset(notes: [MIDINote], quarter: Double, preservingSound: Bool = false) {
@@ -174,6 +194,7 @@ public struct SoloTracker: Codable, Sendable {
 
     public mutating func beginAccompaniedPhrase(scoreTime: Double, tolerance: Double) {
         pendingTempoRate = nil
+        pendingMismatchSince = nil
         // The return starts at planned tempo. Keep the recognized attack so a
         // sustained return note is not mistaken for a second entrance.
         // Let a steady, in-tolerance lead-in guide the gradual adjustment after
@@ -192,6 +213,14 @@ public struct SoloTracker: Codable, Sendable {
                                  throughQuarter: Double = .infinity) -> Int? {
         let frameInterval = previousFrameTime.map { min(0.04, max(0, time - $0)) } ?? 0
         previousFrameTime = time
+        // A brief transition between pitches can interrupt two agreeing estimates.
+        // Only the next sequential score attack can confirm the pending estimate.
+        if pendingTempoRate != nil,
+           time - lastAttack > 2.5 || time - lastMatch > 1.5 ||
+            pendingMismatchSince.map({ time - $0 > 0.12 }) == true {
+            pendingTempoRate = nil
+            pendingMismatchSince = nil
+        }
         guard let pitch else {
             silentFrames += 1
             if silentFrames >= 2 { previousPitch = nil; if releasedAt == nil { releasedAt = time } }
@@ -227,6 +256,7 @@ public struct SoloTracker: Codable, Sendable {
         }
 
         if !attack, let index, notes[index].pitch == pitch {
+            pendingMismatchSince = nil
             lastMatch = time; releasedAt = nil
             return nil
         }
@@ -293,10 +323,14 @@ public struct SoloTracker: Codable, Sendable {
         guard let match = recognized else {
             // An unrecognized pitch supplies no timing evidence. Keep the
             // previous phrase so the next correct attack can corroborate it.
-            if !free { tempoConfirmed = false; pendingTempoRate = nil }
+            if !free {
+                tempoConfirmed = false
+                if pendingTempoRate != nil && pendingMismatchSince == nil { pendingMismatchSince = onset }
+            }
             return nil
         }
         unmatchedAttacks = nil
+        pendingMismatchSince = nil
         // Reacquiring the same written note after a gap refreshes position
         // confidence. Its original onset still belongs to this phrase.
         if !free, match == index {
@@ -313,7 +347,13 @@ public struct SoloTracker: Codable, Sendable {
         // Estimate pace over a short phrase. A frame of onset jitter on a single
         // triplet should not drive the accompaniment all the way to its tempo limit.
         while anchors.count > (free ? 1 : 2) && onset - anchors[1].hostTime >= 1.2 { anchors.removeFirst() }
-        anchors.append(Anchor(scoreTime: scoreTime, hostTime: onset))
+        let followsRestOrLoss = index.map {
+            notes[$0].endQuarter + 1e-7 < notes[match].startQuarter || time - lastMatch > 1.5
+        } ?? false
+        // Compare attack positions at the onset, allowing for pitch confirmation time.
+        let attackError = scoreTime - midi.seconds(atQuarter: expectedQuarter) + (time - onset) * rate
+        anchors.append(Anchor(scoreTime: scoreTime, hostTime: onset,
+                              attackError: free || followsRestOrLoss ? nil : attackError))
         if onset - anchors[0].hostTime > 0.08 {
             let fit = Self.phraseFit(anchors[...])
             if free { rate = min(4, max(0.1, fit.rate)) }
@@ -423,27 +463,42 @@ public struct LiveArticulation: Sendable {
     }
 }
 
-/// Smoothed bounded rate control. Uncertain or stale tracking holds the current
-/// rate; only a trusted phrase may steer tempo or position within the user's limit.
+/// Smoothed playback around the established pulse. Consistently displaced
+/// attacks can correct position while a new phrase tempo is still uncertain.
 public struct FollowingTempo: Codable, Sendable {
     public static let recentMatchWindow = 0.6
     public static let timingAllowance = 0.035
     public private(set) var rate = 1.0
+    private var heldBaseRate: Double?
+    var validForReplay: Bool {
+        (0.25...1.75).contains(rate) && (heldBaseRate.map { (0.25...1.75).contains($0) } ?? true)
+    }
     public init() {}
-    public mutating func reset() { rate = 1 }
-    public mutating func update(delta: Double, tolerance: Double, trackedRate: Double, phaseError: Double, age: Double, reliable: Bool = true) -> Double {
-        let bound = min(0.75, max(0, tolerance))
-        let target: Double
-        if reliable && age < Self.recentMatchWindow {
-            // A breath or slightly late attack is a position difference, not a
-            // new tempo. Allow 35 ms of timing play, then recover gently with at
-            // most four percentage points beyond the established phrase pace.
-            let error = max(0, abs(phaseError) - Self.timingAllowance) * (phaseError < 0 ? -1.0 : 1.0)
-            let correction = min(0.04, max(-0.04, error * 0.5))
-            target = min(1 + bound, max(1 - bound, trackedRate + correction))
+    public mutating func reset() { self = Self() }
+    public mutating func update(delta: Double, tolerance: Double, trackedRate: Double, phaseError: Double,
+                                age: Double, reliable: Bool = true) -> Double {
+        update(FollowingTempoInput(delta: delta, tolerance: tolerance, trackedRate: trackedRate,
+                                   phaseError: phaseError, age: age, reliable: reliable))
+    }
+    public mutating func update(_ input: FollowingTempoInput) -> Double {
+        let bound = min(0.75, max(0, input.tolerance))
+        let base: Double
+        let offset: Double
+        if input.isFollowingTempo {
+            heldBaseRate = nil
+            base = input.trackedRate
+            offset = input.phaseError
+        } else {
+            // Apply position-only adjustments around one fixed pulse. Repeated
+            // ticks must never compound them into a new phrase tempo.
+            if input.isCorrectingPosition && heldBaseRate == nil { heldBaseRate = rate }
+            base = heldBaseRate ?? rate
+            offset = input.isCorrectingPosition ? input.matchedAttackError ?? 0 : 0
         }
-        else { target = rate }
-        rate += (target - rate) * (1 - exp(-max(0, delta) / 0.35))
+        let error = max(0, abs(offset) - Self.timingAllowance) * (offset < 0 ? -1.0 : 1.0)
+        let correction = min(0.04, max(-0.04, error * 0.5))
+        let target = min(1 + bound, max(1 - bound, base + correction))
+        rate += (target - rate) * (1 - exp(-max(0, input.delta) / 0.35))
         rate = min(1 + bound, max(1 - bound, rate))
         return rate
     }

@@ -9,10 +9,13 @@ public struct FollowingTempoInput: Codable, Sendable {
     public let phaseError: Double
     public let age: Double
     public let reliable: Bool
+    public let matchedAttackError: Double?
 
-    public init(delta: Double, tolerance: Double, trackedRate: Double, phaseError: Double, age: Double, reliable: Bool) {
+    public init(delta: Double, tolerance: Double, trackedRate: Double, phaseError: Double, age: Double,
+                reliable: Bool, matchedAttackError: Double? = nil) {
         self.delta = delta; self.tolerance = tolerance; self.trackedRate = trackedRate
         self.phaseError = phaseError; self.age = age; self.reliable = reliable
+        self.matchedAttackError = matchedAttackError
     }
 
     public static func accompanied(delta: Double, tolerance: Double, tracker: SoloTracker,
@@ -30,28 +33,27 @@ public struct FollowingTempoInput: Codable, Sendable {
         return Self(delta: delta, tolerance: tolerance, trackedRate: tracker.rate,
                     phaseError: expectingSound ? error : 0,
                     age: !expectingSound && note != nil && age < 1.5 ? 0 : age,
-                    reliable: tracker.hasReliableTempo)
+                    reliable: tracker.hasReliableTempo,
+                    matchedAttackError: expectingSound ? tracker.corroboratedAttackError(for: note, at: time) : nil)
     }
 
     public var reason: String {
+        if isCorrectingPosition { return "Aligning with consecutive solo attacks" }
         if !reliable { return "Holding tempo: uncertain phrase" }
         if age >= FollowingTempo.recentMatchWindow { return "Holding tempo: no recent match" }
         if abs(phaseError) > FollowingTempo.timingAllowance { return "Following phrase with gentle position correction" }
         return "Following phrase tempo"
     }
 
-    public var isHolding: Bool { !reliable || age >= FollowingTempo.recentMatchWindow }
+    public var isCorrectingPosition: Bool {
+        !reliable && matchedAttackError != nil && age < FollowingTempo.recentMatchWindow
+    }
+    public var isFollowingTempo: Bool { reliable && age < FollowingTempo.recentMatchWindow }
+    public var isHolding: Bool { !isFollowingTempo && !isCorrectingPosition }
     public var valid: Bool {
         delta.isFinite && delta >= 0 && tolerance.isFinite && (0...0.75).contains(tolerance) &&
         trackedRate.isFinite && (0.1...4).contains(trackedRate) && phaseError.isFinite &&
-        (age.isFinite || age == .infinity)
-    }
-}
-
-public extension FollowingTempo {
-    mutating func update(_ input: FollowingTempoInput) -> Double {
-        update(delta: input.delta, tolerance: input.tolerance, trackedRate: input.trackedRate,
-               phaseError: input.phaseError, age: input.age, reliable: input.reliable)
+            (age.isFinite || age == .infinity) && (matchedAttackError?.isFinite ?? true)
     }
 }
 

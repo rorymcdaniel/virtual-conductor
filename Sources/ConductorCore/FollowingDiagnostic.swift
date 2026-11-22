@@ -78,7 +78,7 @@ public struct FollowingDiagnostic: Codable, Sendable {
               report.decisions.allSatisfy({ $0.time.isFinite && $0.expectedQuarter.isFinite && !$0.throughQuarter.isNaN &&
                   $0.tracker.validForReplay(noteCount: report.notes.count) && ($0.pitch.map { (0...127).contains($0) } ?? true) }),
               report.controls?.allSatisfy({ $0.time.isFinite && $0.scoreTime.isFinite && $0.plannedBPM.isFinite &&
-                  $0.plannedBPM > 0 && $0.input.valid && $0.before.rate.isFinite && (0.25...1.75).contains($0.before.rate) &&
+                  $0.plannedBPM > 0 && $0.input.valid && $0.before.validForReplay &&
                   $0.rate.isFinite && (0.25...1.75).contains($0.rate) }) ?? true else {
             throw MusicalError("Unsupported or invalid following diagnostic.")
         }

@@ -50,6 +50,15 @@ are conservative initial tuning values, not a claim of human accompanist judgmen
 fresh, consistent evidence. **Tracking lost**, **Waiting for you**, and **Cadenza**
 retain their distinct meanings. Written tempo changes continue during a hold.
 
+During accompanied playing, the next sequential attack can confirm a tentative
+tempo across a brief unmatched pitch (up to 120 ms). The estimate expires after
+2.5 seconds or 1.5 seconds without a match. A skipped note restarts the phrase.
+
+**Aligning with your note attacks** means the last three distinct attacks were
+each over 100 ms early or each over 100 ms late. While the current pitch matches,
+the orchestra can ease toward the soloist by up to four percentage points around
+the pulse it was holding. The correction fades when the evidence lapses.
+
 Automatic reports capture sustained uncertainty, lost tracking, microphone
 interruptions, and sustained tempo-limit operation. They save off the playback
 thread, at most three per performance and 30 seconds apart; the latest 12 are
@@ -75,7 +84,8 @@ The replay executable accepts a JSON array of cases with these fields:
     "startingRate": 0.87,
     "minimumRate": 0.8,
     "maximumRate": 1.05,
-    "minimumMatches": 3
+    "minimumMatches": 3,
+    "maximumMedianAttackErrorBeats": 0.5
   }
 ]
 ```
@@ -91,17 +101,23 @@ must cover the case. The replay seeds recognition from the report, then runs
 continuously with a simulated accompaniment driven by the same controller used
 live. It requires uninterrupted accompanied passages and rejects crossing waits,
 cadenzas, or recorded capture discontinuities. Assertions check rate bounds and
-a minimum number of recognized attacks, so freezing recognition is not a pass.
+a minimum number of recognized attacks. Each case reports the median absolute
+distance, in quarter beats, between the simulated orchestra and the written
+note at recognition. The optional `maximumMedianAttackErrorBeats` sets a pass
+threshold for that distance.
 Exit codes: 0 pass, 2 changed decisions/failed musical expectations, 1 invalid input.
 
-One actual horn passage is available so far: the measure-27 incident. Both its
+The first real-horn case was the measure-27 incident. Both its
 recorded observations and fresh audio analysis pass, recognizing 11 attacks within the asserted problem interval and
 commanding approximately 0.829–0.846 times planned tempo after the incident.
 Its case manifest remains local in `.scratch/following-rehearsals.json`; neither
 the owner's score nor audio is included in Git. Generated live-controller tests
 cover the 60 ms late breath, sustained 0.84/1.16 tempo ratios, and written tempo
 changes from 120 to 90 and back. Existing tests cover wrong notes and cadenza/
-wait returns. A larger real-horn collection will require future rehearsals.
+wait returns. The November 21 rehearsal adds private recorded-observation cases
+for the tempo recovery at measures 32–33 and the repeated late arrivals at
+measures 190–195 in `.scratch/nov21-following/cases.json`. Those excerpts have
+no microphone audio. Acoustic timing and playing feel require a live rehearsal.
 
 Replay does not measure physical microphone/headphone latency or the musical
 quality of stretched audio. The original pitch ambiguity remains unexplained;

@@ -270,13 +270,15 @@ extension InputCapture: FollowingInput {}
                 let rate = tempo.update(input)
                 audio.setRate(baseRate * rate)
                 let bpm = prepared.practice.bpm(atQuarter: q)
-                if expectingSound && !input.isHolding { lastFollowedBPM = bpm * rate }
+                if expectingSound && input.isFollowingTempo { lastFollowedBPM = bpm * rate }
                 diagnostics.recordControl(FollowingControlDecision(time: now, scoreTime: planned.seconds(atQuarter: q),
                     plannedBPM: bpm, before: before, input: input, rate: rate))
                 if expectingSound, let listeningSince, now - max(listeningSince, tracker.lastMatch) > Self.trackingLossDelay {
                     status = .lost; detail = "Keeping moving · listening for your position"
                 } else if writtenRest {
                     status = .following; detail = "Written solo rest · keeping the pulse"
+                } else if input.isCorrectingPosition {
+                    status = .following; detail = "Aligning with your note attacks"
                 } else if input.isHolding {
                     status = .holding
                     detail = hasRecentPitchMatch ? "Matching your notes · keeping the current tempo" : "Listening for your next matching note"
