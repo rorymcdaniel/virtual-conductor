@@ -1,5 +1,33 @@
 import Foundation
 
+/// Maps microphone-clock onsets onto recent measured playback positions.
+/// A sample outside the observed transport interval supplies no position evidence.
+public struct AccompanimentPositions {
+    private var samples: [(host: Double, score: Double)] = []
+
+    public init() {}
+
+    public mutating func record(host: Double, score: Double) {
+        if let last = samples.last, host < last.host || host - last.host > 0.25 || score < last.score {
+            samples.removeAll(keepingCapacity: true)
+        }
+        if samples.last?.host == host { samples.removeLast() }
+        if let first = samples.firstIndex(where: { host - $0.host <= 0.6 }) {
+            samples.removeFirst(first)
+        }
+        samples.append((host, score))
+    }
+
+    public func scoreTime(at host: Double) -> Double? {
+        guard let last = samples.last, host <= last.host,
+              let i = samples.lastIndex(where: { $0.host <= host }) else { return nil }
+        let start = samples[i]
+        if start.host == host { return start.score }
+        let end = samples[i + 1]
+        return start.score + (end.score - start.score) * (host - start.host) / (end.host - start.host)
+    }
+}
+
 /// The evidence used for one accompaniment adjustment. Times are seconds on
 /// the original MIDI timeline, excluding count-in/preparation.
 public struct FollowingTempoInput: Codable, Sendable {

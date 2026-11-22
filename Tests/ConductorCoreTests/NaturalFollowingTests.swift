@@ -15,7 +15,8 @@ final class NaturalFollowingTests: XCTestCase {
                     let time = onset + Double(frame) / 100
                     let scoreTime = midi.seconds(atQuarter: notes[i].startQuarter) + offset + time - onset
                     tracker.observe(pitch: notes[i].pitch, time: time, notes: notes,
-                        expectedQuarter: midi.quarter(atSeconds: scoreTime), free: false, midi: midi)
+                        expectedQuarter: midi.quarter(atSeconds: scoreTime), free: false, midi: midi,
+                        accompanimentAtOnset: { scoreTime + $0 - time })
                     let input = FollowingTempoInput.accompanied(delta: 0.01, tolerance: 0.3, tracker: tracker,
                         notes: notes, midi: midi, scoreTime: scoreTime, time: time)
                     _ = tempo.update(input)

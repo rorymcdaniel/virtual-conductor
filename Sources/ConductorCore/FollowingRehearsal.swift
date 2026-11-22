@@ -64,19 +64,32 @@ public enum FollowingRehearsal {
         guard observations.count >= 3 else { throw MusicalError("Too little rehearsal evidence.") }
         var tracker = first.tracker, controller = FollowingTempo()
         _ = controller.update(delta: 100, tolerance: report.tolerance/100, trackedRate: test.startingRate, phaseError: 0, age: 0)
-        var position = report.midi.seconds(atQuarter: first.expectedQuarter), previous = first.time
+        var history = AccompanimentPositions()
+        // Older reports may only have the recognition search position. Prefer
+        // measured transport when playback commands bracket the first sample.
+        for control in report.controls ?? [] where abs(control.time - first.time) <= 0.25 {
+            history.record(host: control.time, score: control.scoreTime)
+        }
+        var position = history.scoreTime(at: first.time) ?? report.midi.seconds(atQuarter: first.expectedQuarter)
+        history = AccompanimentPositions()
+        var previous = first.time
         var minimum = Double.infinity, maximum = -Double.infinity, checked = 0
         var attackErrors: [Double] = []
+        var matches = 0
         let checkTime = report.decisions.first { $0.expectedQuarter >= test.checkFromQuarter }?.time ?? .infinity
         for observation in observations {
             let delta = observation.time - previous
             guard delta >= 0 && delta <= 0.25 else { throw MusicalError("Rehearsal observations contain a timing discontinuity.") }
             position += delta * controller.rate
+            history.record(host: observation.time, score: position)
             let quarter = report.midi.quarter(atSeconds: position)
             if let index = tracker.observe(pitch: observation.pitch, time: observation.time, notes: report.notes,
                 expectedQuarter: quarter, free: false, midi: report.midi,
-                rearticulated: observation.rearticulated), observation.time >= checkTime {
-                attackErrors.append(abs(quarter - report.notes[index].startQuarter))
+                rearticulated: observation.rearticulated, accompanimentAtOnset: history.scoreTime), observation.time >= checkTime {
+                matches += 1
+                if let atAttack = history.scoreTime(at: tracker.lastAttack) {
+                    attackErrors.append(abs(report.midi.quarter(atSeconds: atAttack) - report.notes[index].startQuarter))
+                }
             }
             let input = FollowingTempoInput.accompanied(delta: min(0.1, delta), tolerance: report.tolerance/100,
                 tracker: tracker, notes: report.notes, midi: report.midi, scoreTime: position, time: observation.time)
@@ -88,9 +101,9 @@ public enum FollowingRehearsal {
         attackErrors.sort()
         let count = attackErrors.count
         let median = count == 0 ? nil : (attackErrors[(count - 1) / 2] + attackErrors[count / 2]) / 2
-        let timingPasses = test.maximumMedianAttackErrorBeats.map { (median ?? .infinity) <= $0 } ?? true
-        return FollowingRehearsalResult(frames: observations.count, matches: count, minimumRate: minimum,
-            maximumRate: maximum, medianAttackErrorBeats: median, passed: timingPasses && count >= test.minimumMatches &&
+        let timingPasses = test.maximumMedianAttackErrorBeats.map { count >= test.minimumMatches && (median ?? .infinity) <= $0 } ?? true
+        return FollowingRehearsalResult(frames: observations.count, matches: matches, minimumRate: minimum,
+            maximumRate: maximum, medianAttackErrorBeats: median, passed: timingPasses && matches >= test.minimumMatches &&
                 minimum >= test.minimumRate - 1e-9 && maximum <= test.maximumRate + 1e-9)
     }
 }

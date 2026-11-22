@@ -43,6 +43,7 @@ extension InputCapture: FollowingInput {}
     private let permission: () async -> Bool
     private var tracker = SoloTracker()
     private var tempo = FollowingTempo()
+    private var accompanimentPositions = AccompanimentPositions()
     private var buffers: [Double: AudioSegment] = [:]
     private var boundaries: [Double] = []
     private var audioEnd = 0.0
@@ -144,6 +145,7 @@ extension InputCapture: FollowingInput {}
     private func enter(at location: Double, initial: Bool = false, fromAccompaniment: Bool = false) throws {
         guard let plan, let prepared, let audio else { return }
         position = location; entered = clock(); queuedEnd = nil
+        accompanimentPositions = AccompanimentPositions()
         if location >= prepared.end - 1e-7 {
             stop(); status = .finished; completed?(); return
         }
@@ -252,10 +254,13 @@ extension InputCapture: FollowingInput {}
                 if prepared.timing.scoreTime(performanceSeconds: position) - prepared.midi.seconds(atQuarter: q) > 1e-6 {
                     listeningSince = nil
                     writtenRest = true
+                    accompanimentPositions = AccompanimentPositions()
                     audio.setRate(baseRate * tempo.rate)
                     status = .following; detail = "Caesura · waiting through the recorded pause"
                     return
                 }
+                let scoreTime = planned.seconds(atQuarter: q)
+                accompanimentPositions.record(host: now, score: scoreTime)
                 let expectingSound = plan.notes.contains { $0.startQuarter <= q && q < $0.endQuarter }
                 writtenRest = !expectingSound
                 if expectingSound {
@@ -265,13 +270,13 @@ extension InputCapture: FollowingInput {}
                     listeningSince = nil
                 }
                 let input = FollowingTempoInput.accompanied(delta: delta, tolerance: tolerance / 100, tracker: tracker,
-                    notes: plan.notes, midi: planned, scoreTime: planned.seconds(atQuarter: q), time: now)
+                    notes: plan.notes, midi: planned, scoreTime: scoreTime, time: now)
                 let before = tempo
                 let rate = tempo.update(input)
                 audio.setRate(baseRate * rate)
                 let bpm = prepared.practice.bpm(atQuarter: q)
                 if expectingSound && input.isFollowingTempo { lastFollowedBPM = bpm * rate }
-                diagnostics.recordControl(FollowingControlDecision(time: now, scoreTime: planned.seconds(atQuarter: q),
+                diagnostics.recordControl(FollowingControlDecision(time: now, scoreTime: scoreTime,
                     plannedBPM: bpm, before: before, input: input, rate: rate))
                 if expectingSound, let listeningSince, now - max(listeningSince, tracker.lastMatch) > Self.trackingLossDelay {
                     status = .lost; detail = "Keeping moving · listening for your position"
@@ -354,6 +359,7 @@ extension InputCapture: FollowingInput {}
     }
 
     private func resetAnalysis(_ reason: String) {
+        accompanimentPositions = AccompanimentPositions()
         let now = clock()
         diagnostics.notice("Audio delivery discontinuity: " + reason, time: now, kind: .interruption)
         diagnostics.preserveIncident(reason, time: now)
@@ -433,8 +439,9 @@ extension InputCapture: FollowingInput {}
         }
         let before = tracker
         let expected = quarter(position)
-        let matched = tracker.observe(pitch: pitch, time: time, notes: plan.notes, expectedQuarter: quarter(position),
-                                      free: free, midi: prepared.practice.planned, rearticulated: rearticulated, throughQuarter: lastQuarter)
+        let matched = tracker.observe(pitch: pitch, time: time, notes: plan.notes, expectedQuarter: expected,
+                                      free: free, midi: prepared.practice.planned, rearticulated: rearticulated,
+                                      throughQuarter: lastQuarter, accompanimentAtOnset: accompanimentPositions.scoreTime)
         diagnostics.record(FollowingDecision(tracker: before, pitch: pitch, time: time, expectedQuarter: expected,
                                              free: free, throughQuarter: lastQuarter, rearticulated: rearticulated,
                                              matched: matched, rate: tracker.rate, phase: String(describing: phase), level: level))

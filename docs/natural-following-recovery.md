@@ -58,6 +58,10 @@ tempo across a brief unmatched pitch (up to 120 ms). The estimate expires after
 each over 100 ms early or each over 100 ms late. While the current pitch matches,
 the orchestra can ease toward the soloist by up to four percentage points around
 the pulse it was holding. The correction fades when the evidence lapses.
+The app compares each attack's microphone timestamp with the orchestra's
+position between playback ticks. Input that arrives late can still describe an
+on-time attack. An onset outside the available playback history supplies no
+position correction.
 
 Automatic reports capture sustained uncertainty, lost tracking, microphone
 interruptions, and sustained tempo-limit operation. They save off the playback
@@ -103,7 +107,8 @@ live. It requires uninterrupted accompanied passages and rejects crossing waits,
 cadenzas, or recorded capture discontinuities. Assertions check rate bounds and
 a minimum number of recognized attacks. Each case reports the median absolute
 distance, in quarter beats, between the simulated orchestra and the written
-note at recognition. The optional `maximumMedianAttackErrorBeats` sets a pass
+note at the estimated onset of each matched attack. The optional
+`maximumMedianAttackErrorBeats` sets a pass
 threshold for that distance.
 Exit codes: 0 pass, 2 changed decisions/failed musical expectations, 1 invalid input.
 
@@ -118,6 +123,11 @@ wait returns. The November 21 rehearsal adds private recorded-observation cases
 for the tempo recovery at measures 32–33 and the repeated late arrivals at
 measures 190–195 in `.scratch/nov21-following/cases.json`. Those excerpts have
 no microphone audio. Acoustic timing and playing feel require a live rehearsal.
+
+Using the same sample-timed replay for both versions, the opening excerpt
+previously held at 76.8 BPM. It now reaches 100 BPM after the m.33 downbeat.
+The ending's median absolute error fell from 0.538 to 0.439 quarter beats
+across the same 12 matched attacks.
 
 Replay does not measure physical microphone/headphone latency or the musical
 quality of stretched audio. The original pitch ambiguity remains unexplained;

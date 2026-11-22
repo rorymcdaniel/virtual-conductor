@@ -210,7 +210,8 @@ public struct SoloTracker: Codable, Sendable {
     @discardableResult
     public mutating func observe(pitch: Int?, time: Double, notes: [MIDINote], expectedQuarter: Double,
                                  free: Bool, midi: MIDIFile, rearticulated: Bool = false,
-                                 throughQuarter: Double = .infinity) -> Int? {
+                                 throughQuarter: Double = .infinity,
+                                 accompanimentAtOnset: (Double) -> Double? = { _ in nil }) -> Int? {
         let frameInterval = previousFrameTime.map { min(0.04, max(0, time - $0)) } ?? 0
         previousFrameTime = time
         // A brief transition between pitches can interrupt two agreeing estimates.
@@ -350,8 +351,7 @@ public struct SoloTracker: Codable, Sendable {
         let followsRestOrLoss = index.map {
             notes[$0].endQuarter + 1e-7 < notes[match].startQuarter || time - lastMatch > 1.5
         } ?? false
-        // Compare attack positions at the onset, allowing for pitch confirmation time.
-        let attackError = scoreTime - midi.seconds(atQuarter: expectedQuarter) + (time - onset) * rate
+        let attackError = accompanimentAtOnset(onset).map { scoreTime - $0 }
         anchors.append(Anchor(scoreTime: scoreTime, hostTime: onset,
                               attackError: free || followsRestOrLoss ? nil : attackError))
         if onset - anchors[0].hostTime > 0.08 {

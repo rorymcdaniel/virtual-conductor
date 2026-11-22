@@ -396,6 +396,34 @@ final class SoloFollowingTests: XCTestCase {
 }
 
 @MainActor final class LiveFollowingTests: XCTestCase {
+    func testDelayedDeliveryOnlySteersWhenTheAttacksThemselvesWereLate() async throws {
+        let prepared = try FollowingFixture.prepared()
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        for lateness in [0.0, 0.21] {
+            let audio = FollowingTestAudio(), diagnostics = makeDiagnostics()
+            var now = 0.0
+            let following = LiveFollowing(diagnostics: diagnostics, capture: FollowingTestInput(), clock: { now },
+                permission: { true }, defaults: UserDefaults(suiteName: UUID().uuidString)!)
+            try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0)
+            let onsets = (0..<8).map { i in
+                i == 0 ? 0.5 : 0.5 + Double(i) / 2 + (i.isMultiple(of: 2) ? 0.07 : -0.07) + lateness
+            }
+            for frame in 1...490 {
+                now = Double(frame) / 100
+                audio.sourcePosition = now
+                following.tick()
+                let sampleTime = now - 0.18
+                let note = onsets.lastIndex { $0 <= sampleTime }
+                following.observe(pitch: note.map { plan.notes[$0].pitch }, time: sampleTime)
+            }
+            following.stop()
+            let report = try XCTUnwrap(diagnostics.report)
+            XCTAssertGreaterThanOrEqual(report.decisions.compactMap(\.matched).count, 7)
+            let correcting = try XCTUnwrap(report.controls).contains { $0.input.isCorrectingPosition }
+            XCTAssertEqual(correcting, lateness > 0)
+        }
+    }
+
     func testWrittenSoloRestDoesNotConsumeAutomaticProblemReports() async throws {
         let input = FollowingTestInput(), audio = FollowingTestAudio(), diagnostics = makeDiagnostics()
         let prepared = try FollowingFixture.prepared()
