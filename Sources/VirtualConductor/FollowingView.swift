@@ -13,6 +13,7 @@ struct FollowingView: View {
     @State private var returnBeat = "1"
     @State private var measure = 1
     @State private var beat = 1.0
+    @State private var reportMeasures = ""
     @State private var error = ""
     @State private var inputID: UInt32 = 0
 
@@ -88,17 +89,33 @@ struct FollowingView: View {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }.frame(height: 120)
             }
+            HStack {
+                Text("Save following reports at measures")
+                TextField("Measure numbers, separated by commas", text: $reportMeasures)
+                    .accessibilityLabel("Save following reports at measures")
+            }
             Text(error).font(.caption).foregroundStyle(.orange).frame(minHeight: 30)
             HStack {
                 Button("Cancel") { model.followingOpen = false }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save and reset") {
-                    do { try model.saveFollowing(values, tolerance: tolerance, inputID: inputID) }
+                    do {
+                        let fields = reportMeasures.split(whereSeparator: { $0 == "," || $0.isWhitespace })
+                        let numbers = fields.compactMap { Int($0) }
+                        guard numbers.count == fields.count else { throw MusicalError("Enter whole measure numbers separated by commas.") }
+                        values.reportMeasures = Set(numbers)
+                        try model.saveFollowing(values, tolerance: tolerance, inputID: inputID)
+                    }
                     catch { self.error = error.localizedDescription }
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: 620)
-            .onAppear { values = model.scorePreparation.following; tolerance = model.following.tolerance; inputID = model.followingInputID() }
+            .onAppear {
+                values = model.scorePreparation.following
+                reportMeasures = values.reportMeasures.sorted().map(String.init).joined(separator: ", ")
+                tolerance = model.following.tolerance
+                inputID = model.followingInputID()
+            }
     }
     private var freeEditor: some View {
         VStack(alignment: .leading, spacing: 10) {

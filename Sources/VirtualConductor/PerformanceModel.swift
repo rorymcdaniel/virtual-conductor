@@ -380,6 +380,7 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
     private func startFollowing(_ prepared: PreparedPerformance) {
         do {
             let plan = try followingPlan()
+            let reportMeasures = scorePreparation.following.reportMeasures
             let input = followingInputID()
             guard input != 0 else { throw MusicalError("The selected microphone is unavailable. Reconnect it or choose an input in Live following.") }
             following.inputID = input
@@ -387,7 +388,7 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
             state = .starting; message = "Preparing live following and microphone…"
             Task {
                 do {
-                    try await following.start(prepared: prepared, plan: plan, audio: audio, position: start)
+                    try await following.start(prepared: prepared, plan: plan, audio: audio, position: start, reportMeasures: reportMeasures)
                     guard token == run else { return }
                     segmentStart = start; state = .running
                     message = "Live following · headphones · Right Arrow releases waits or cues a solo return."

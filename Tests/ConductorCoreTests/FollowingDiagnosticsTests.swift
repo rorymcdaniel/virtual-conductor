@@ -3,6 +3,63 @@ import ConductorCore
 @testable import VirtualConductor
 
 @MainActor final class FollowingDiagnosticsTests: XCTestCase {
+    func testSelectedMeasureSavesDuringPlaybackAfterAllIncidentReportsAreUsed() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let diagnostics = FollowingDiagnostics(root: root)
+        let audio = FollowingTestAudio(), prepared = try FollowingFixture.prepared()
+        let plan = try FollowingPlan(score: FollowingFixture.score(silentMeasures: 0), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        var now = 0.0
+        let following = LiveFollowing(diagnostics: diagnostics, capture: FollowingTestInput(), clock: { now }, permission: { true })
+        try await following.start(prepared: prepared, plan: plan, audio: audio, position: 0, reportMeasures: [3])
+        defer { following.stop() }
+        for _ in 0..<3 {
+            XCTAssertTrue(diagnostics.preserveIncident("Earlier incident", time: now))
+            while diagnostics.saving { await Task.yield() }
+            now += 30
+        }
+        let previous = diagnostics.savedURL
+        diagnostics.includeAudio = true
+        diagnostics.capture([Float](repeating: 0.1, count: 800), start: now - 0.1)
+        following.observe(pitch: 60, time: now)
+        for _ in 0..<3 {
+            now += 0.02
+            audio.sourcePosition = prepared.timing.performanceTime(scoreSeconds: prepared.midi.seconds(atQuarter: 8)) + 0.01
+            following.tick()
+            while diagnostics.saving { await Task.yield() }
+        }
+        let url = try XCTUnwrap(diagnostics.savedURL)
+        XCTAssertNotEqual(url, previous)
+        let report = try FollowingDiagnostic.decode(Data(contentsOf: url.appendingPathComponent("report.json")))
+        XCTAssertTrue(report.notices.contains { $0.reason.contains("measure 3") })
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.appendingPathComponent("audio.wav").path))
+        XCTAssertFalse(report.decisions.isEmpty)
+        XCTAssertTrue(report.replay().isEmpty)
+        XCTAssertTrue(following.active)
+        XCTAssertEqual(audio.played.count, 1)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Automatic").path).count, 4)
+    }
+
+    func testMeasureSnapshotWaitsForAnEarlierWriteAndHonorsAudioOptOut() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let diagnostics = FollowingDiagnostics(root: root)
+        let plan = try FollowingPlan(score: FollowingFixture.score(), solo: FollowingFixture.solo, waits: [], cadenzas: [])
+        diagnostics.begin(sampleRate: 8000, tolerance: 20, plan: plan, midi: try FollowingFixture.midi())
+        diagnostics.includeAudio = true
+        diagnostics.capture([0.1, 0.2], start: 0)
+        XCTAssertTrue(diagnostics.preserveIncident("Earlier incident", time: 0))
+        XCTAssertTrue(diagnostics.saveAtMeasure(3, time: 0.1))
+        diagnostics.notice("Later evidence", time: 0.2)
+        diagnostics.includeAudio = false
+        while diagnostics.saving { await Task.yield() }
+        let url = try XCTUnwrap(diagnostics.savedURL)
+        let saved = try FollowingDiagnostic.decode(Data(contentsOf: url.appendingPathComponent("report.json")))
+        XCTAssertEqual(saved.notices.last?.reason, "Scheduled snapshot at measure 3")
+        XCTAssertNil(saved.audioStart)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.appendingPathComponent("audio.wav").path))
+    }
+
     func testOptingOutDuringAFailedSaveCannotRestoreAudioOnRetry() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try Data("blocked".utf8).write(to: root)

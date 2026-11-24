@@ -3,12 +3,17 @@ import ConductorCore
 
 /// Recent, bounded local evidence. Audio is collected only with explicit opt-in.
 @MainActor final class FollowingDiagnostics: ObservableObject {
+    typealias Snapshot = (report: FollowingDiagnostic, samples: [Float])
+
     @Published var includeAudio = false {
         didSet {
             if !includeAudio {
                 audioChunks = []; audioCount = 0
+                for index in queuedMeasures.indices {
+                    Self.discardAudio(from: &queuedMeasures[index].snapshot)
+                }
                 if var failed = failedSnapshot {
-                    failed.0.audioStart = nil; failed.0.audioEnd = nil; failed.1 = []
+                    Self.discardAudio(from: &failed)
                     failedSnapshot = failed
                 }
             }
@@ -27,7 +32,9 @@ import ConductorCore
     private var incidentSaved = false
     private var automaticCount = 0
     private var lastAutomaticTime = -Double.infinity
-    private var failedSnapshot: (FollowingDiagnostic, [Float])?
+    // Keep the exact barline excerpt if an earlier write is still running.
+    private var queuedMeasures: [(session: UUID, snapshot: Snapshot)] = []
+    private var failedSnapshot: Snapshot?
     var canSave: Bool { available || failedSnapshot != nil }
     let root: URL
     init(root: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -81,9 +88,22 @@ import ConductorCore
         notice("Automatic snapshot: " + reason, time: time)
         guard let snapshot = snapshot() else { return false }
         automaticCount += 1; lastAutomaticTime = time
-        persist(snapshot, automatic: true)
+        persist(snapshot, automatic: true, session: session)
         return true
     }
+
+    func saveAtMeasure(_ measure: Int, time: Double) -> Bool {
+        guard report != nil, failedSnapshot == nil else { return false }
+        notice("Scheduled snapshot at measure \(measure)", time: time)
+        guard let captured = snapshot() else { return false }
+        if saving {
+            queuedMeasures.append((session, captured))
+        } else {
+            persist(captured, automatic: true, session: session)
+        }
+        return true
+    }
+
     func capture(_ samples: [Float], start: Double) {
         guard includeAudio, let report, !samples.isEmpty else { return }
         audioChunks.append((start, samples)); audioCount += samples.count
@@ -99,7 +119,7 @@ import ConductorCore
         }
     }
     func audioDiscontinuity() { audioChunks = []; audioCount = 0 }
-    func snapshot() -> (FollowingDiagnostic, [Float])? {
+    func snapshot() -> Snapshot? {
         guard var report else { return nil }
         let chunks = includeAudio ? audioChunks : []
         report.audioStart = chunks.first?.start
@@ -108,12 +128,18 @@ import ConductorCore
     }
     func save() {
         guard !saving, let snapshot = failedSnapshot ?? (available ? snapshot() : nil) else { return }
-        persist(snapshot, automatic: false)
+        persist(snapshot, automatic: false, session: session)
     }
 
-    private func persist(_ captured: (FollowingDiagnostic, [Float]), automatic: Bool) {
+    private static func discardAudio(from captured: inout Snapshot) {
+        captured.report.audioStart = nil
+        captured.report.audioEnd = nil
+        captured.samples = []
+    }
+
+    private func persist(_ captured: Snapshot, automatic: Bool, session capturedSession: UUID) {
         saving = true
-        let root = root, capturedSession = session
+        let root = root
         Task {
             do {
                 let url = try await Task.detached(priority: .utility) {
@@ -122,22 +148,27 @@ import ConductorCore
                 failedSnapshot = nil
                 if capturedSession == session {
                     savedURL = url
-                    message = (automatic ? "Problem report saved automatically" : "Diagnostic saved locally") +
+                    message = (automatic ? "Following report saved automatically" : "Diagnostic saved locally") +
                         (captured.1.isEmpty ? " without audio." : " with a recent audio excerpt.")
                 }
             } catch {
                 var retained = captured
                 if !includeAudio {
-                    retained.0.audioStart = nil; retained.0.audioEnd = nil; retained.1 = []
+                    Self.discardAudio(from: &retained)
                 }
                 failedSnapshot = retained
                 message = "Report could not be saved. Evidence kept in memory; Save following report retries. " + error.localizedDescription
             }
-            saving = false
+            if failedSnapshot == nil, !queuedMeasures.isEmpty {
+                let next = queuedMeasures.removeFirst()
+                persist(next.snapshot, automatic: true, session: next.session)
+            } else {
+                saving = false
+            }
         }
     }
 
-    private nonisolated static func write(_ captured: (FollowingDiagnostic, [Float]), root: URL, automatic: Bool) throws -> URL {
+    private nonisolated static func write(_ captured: Snapshot, root: URL, automatic: Bool) throws -> URL {
         let (snapshot, samples) = captured, fm = FileManager.default
         let parent = automatic ? root.appendingPathComponent("Automatic", isDirectory: true) : root
         try fm.createDirectory(at: parent, withIntermediateDirectories: true)

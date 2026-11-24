@@ -261,12 +261,16 @@ final class LongRestSetupTests: XCTestCase {
         XCTAssertEqual(try model.followingPlan().notes.map(\.pitch), [48])
 
         var draft = model.scorePreparation.following
+        XCTAssertTrue(draft.reportMeasures.isEmpty)
         draft.solo = other
         draft.waits = [WaitPoint(measure: 2, beat: 1)]
         XCTAssertThrowsError(try model.saveFollowing(draft, tolerance: .nan))
         XCTAssertEqual(model.longRestSetup.schedule?.staffID, saved)
         let microphone = AudioDevice(id: 701, uid: "test-usb-mic", name: "Test USB mic", input: true, output: false)
         model.devices = [microphone]
+        draft.reportMeasures = [0]
+        XCTAssertThrowsError(try model.saveFollowing(draft, tolerance: 15, inputID: microphone.id))
+        draft.reportMeasures = [2]
         try model.saveFollowing(draft, tolerance: 15, inputID: microphone.id)
         XCTAssertEqual(model.longRestSetup.schedule?.staffID, other)
         XCTAssertEqual(try model.followingPlan().waits, [4])
@@ -282,6 +286,7 @@ final class LongRestSetupTests: XCTestCase {
         XCTAssertEqual(relaunched.state, .ready)
         XCTAssertEqual(relaunched.midiURL, midi.standardizedFileURL)
         XCTAssertEqual(relaunched.longRestSetup.schedule?.staffID, other)
+        XCTAssertEqual(relaunched.scorePreparation.following.reportMeasures, [2])
         XCTAssertEqual(try relaunched.followingPlan().waits, [4])
         XCTAssertEqual(relaunched.following.tolerance, 15)
         XCTAssertEqual(relaunched.followingInputID(), 0) // A missing explicit input must not fall back to the system microphone.

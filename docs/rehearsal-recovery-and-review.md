@@ -61,12 +61,21 @@ begins a fresh capture. Nothing is uploaded.
 
 Problem reports now also save automatically after tracking loss, an audio
 interruption, three seconds holding for uncertain evidence, or two seconds at a
-tempo limit. At most three automatic reports are saved per performance, at least
+tempo limit. At most three problem-triggered reports are saved per performance, at least
 30 seconds apart. They include up to 3,000 playback commands in addition to the
 recognition decisions. **Show report** opens the latest saved report from this
 performance. A failed write preserves a frozen snapshot in memory for **Save
 following report** to retry, even after starting another performance. That unsaved
 snapshot does not survive quitting the app.
+
+To capture a passage while playing a full run, enter comma-separated measure
+numbers in **Live following → Save following reports at measures** and choose
+**Save and reset**. The app saves the preceding excerpt when playback reaches
+each selected printed measure. Choose a measure just after the passage you want
+to review. These saves work even after all three problem reports have fired and
+share the newest-12 automatic report history. The choices are saved for the
+current export pair. Clear the field to turn them off. Audio uses the same
+opt-in and 15-second window as a manual report.
 
 The installed app includes a replay tool:
 

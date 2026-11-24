@@ -48,6 +48,7 @@ extension InputCapture: FollowingInput {}
     private var boundaries: [Double] = []
     private var audioEnd = 0.0
     private var queuedEnd: Double?
+    private var remainingReportMeasures: Set<Int> = []
     private var approvedWaits: Set<Double> = []
     private var phase: Phase = .audio
     private var lastTick = 0.0
@@ -85,7 +86,8 @@ extension InputCapture: FollowingInput {}
         tolerance = saved.isFinite && (0...75).contains(saved) ? saved : 10
         self.capture.interrupted = { [weak self] in self?.inputFailed() }
     }
-    func start(prepared: PreparedPerformance, plan: FollowingPlan, audio: any FollowingAudio, position: Double) async throws {
+    func start(prepared: PreparedPerformance, plan: FollowingPlan, audio: any FollowingAudio, position: Double,
+               reportMeasures: Set<Int> = []) async throws {
         stop()
         generation &+= 1; let token = generation
         guard await permission() else {
@@ -119,6 +121,7 @@ extension InputCapture: FollowingInput {}
         self.prepared = prepared; self.plan = plan; self.audio = audio
         buffers = Dictionary(uniqueKeysWithValues: segments.map { ($0.position, $0) }); boundaries = limits
         self.position = position; active = true; lastTick = clock(); lastObservation = lastTick; droppedSamples = 0
+        remainingReportMeasures = reportMeasures
         diagnostics.begin(sampleRate: capture.sampleRate, tolerance: tolerance, plan: plan, midi: prepared.practice.planned)
         diagnostics.notice("Following started", time: clock(), kind: .started)
         tracker.reset(notes: plan.notes, quarter: max(timing.startQuarter, quarter(position)))
@@ -225,6 +228,11 @@ extension InputCapture: FollowingInput {}
                 let atLimit: Bool
                 if case .audio = phase { atLimit = tolerance > 0 && abs(tempo.rate - 1) >= tolerance / 100 - 0.002 }
                 else { atLimit = false }
+                if !remainingReportMeasures.isEmpty, position >= prepared.timing.prepSeconds,
+                   let measure = prepared.timing.position(position).measure,
+                   remainingReportMeasures.contains(measure), diagnostics.saveAtMeasure(measure, time: now) {
+                    remainingReportMeasures.remove(measure)
+                }
                 diagnostics.monitor(status: status, time: now, atTempoLimit: atLimit && !writtenRest)
             }
         }

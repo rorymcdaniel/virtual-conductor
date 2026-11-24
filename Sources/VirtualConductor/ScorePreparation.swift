@@ -8,6 +8,7 @@ struct FollowingConfiguration: Codable {
     var followWrittenCadenzas = true
     var solo: MusicXMLStaffID?
     var waits: [WaitPoint] = []
+    var reportMeasures: Set<Int> = []
     var freePassages: [PassageRange] = []
 
     init() {}
@@ -17,6 +18,7 @@ struct FollowingConfiguration: Codable {
         followWrittenCadenzas = try fields.decodeIfPresent(Bool.self, forKey: .followWrittenCadenzas) ?? true
         solo = try fields.decodeIfPresent(MusicXMLStaffID.self, forKey: .solo)
         waits = try fields.decode([WaitPoint].self, forKey: .waits)
+        reportMeasures = try fields.decodeIfPresent(Set<Int>.self, forKey: .reportMeasures) ?? []
         freePassages = try fields.decodeIfPresent([PassageRange].self, forKey: .freePassages) ?? []
     }
 }
@@ -174,6 +176,9 @@ struct ScorePreparation {
 
     mutating func saveFollowing(_ draft: FollowingConfiguration) throws {
         guard var context = accepted else { throw MusicalError("Load matching exports before saving following settings.") }
+        guard draft.reportMeasures.allSatisfy({ $0 >= 1 && $0 <= context.source.midi.measures }) else {
+            throw MusicalError("Choose report measures between 1 and \(context.source.midi.measures).")
+        }
         var values = draft
         values.solo = validStaff(draft.solo)
         let data = try JSONEncoder().encode(values)
