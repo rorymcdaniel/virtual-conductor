@@ -366,7 +366,9 @@ enum PerformanceState: String { case empty, loading, ready, starting, running, p
         if values.enabled || !values.waits.isEmpty || !values.freePassages.isEmpty { _ = try followingPlan(configuration: values) }
         guard tolerance.isFinite, (0...75).contains(tolerance) else { throw MusicalError("Choose a tempo tolerance from 0–75%.") }
         let input = inputID.flatMap { id in devices.first(where: { $0.input && $0.id == id }) }
-        if values.enabled, inputID != nil, input == nil {
+        // Zero is the picker placeholder when the saved interface is disconnected.
+        let keepingSavedInput = inputID == 0 && scorePreparation.following.enabled && defaults.string(forKey: "following-input-uid") != nil
+        if values.enabled, inputID != nil, input == nil, !keepingSavedInput {
             throw MusicalError("Choose an available microphone before enabling live following.")
         }
         try scorePreparation.saveFollowing(values)

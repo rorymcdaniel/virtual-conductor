@@ -290,6 +290,11 @@ final class LongRestSetupTests: XCTestCase {
         XCTAssertEqual(try relaunched.followingPlan().waits, [4])
         XCTAssertEqual(relaunched.following.tolerance, 15)
         XCTAssertEqual(relaunched.followingInputID(), 0) // A missing explicit input must not fall back to the system microphone.
+        var offlineDraft = relaunched.scorePreparation.following
+        offlineDraft.reportMeasures = [1, 2]
+        try relaunched.saveFollowing(offlineDraft, tolerance: 15, inputID: 0)
+        XCTAssertEqual(relaunched.scorePreparation.following.reportMeasures, [1, 2])
+        XCTAssertEqual(defaults.string(forKey: "following-input-uid"), microphone.uid)
         relaunched.devices = [AudioDevice(id: 702, uid: microphone.uid, name: microphone.name, input: true, output: false)]
         XCTAssertEqual(relaunched.followingInputID(), 702) // Core Audio can assign a new numeric ID after a restart.
 
